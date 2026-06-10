@@ -4,7 +4,11 @@
   "description": "Chroma Server Manager is a Minecraft Bedrock Dedicated Server and addon manager.",
   "private": true,
   "type": "module",
-  "scripts": {},
+  "scripts": {
+    "dev:server": "tsx src/server/index.ts",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc"
+  },
   "keywords": [
     "minecraft",
     "bedrock",
@@ -14,5 +18,10 @@
   ],
   "author": "Nerd Turtle",
   "license": "UNLICENSED",
-  "packageManager": "pnpm@11.5.3"
+  "packageManager": "pnpm@11.5.3",
+  "devDependencies": {
+    "@types/node": "^25.9.2",
+    "tsx": "^4.22.4",
+    "typescript": "^6.0.3"
+  }
 }
