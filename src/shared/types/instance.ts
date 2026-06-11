@@ -8,7 +8,6 @@ export type InstanceStatus =
 export type Instance = {
   id: string;
   friendlyName: string;
-  slug: string;
   status: InstanceStatus;
   bdsVersion: string;
   instancePath: string;

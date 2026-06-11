@@ -1,5 +1,6 @@
 import Fastify from "fastify";
 import { getRuntimePaths } from "./config/paths.js";
+import { registerInstanceRoutes } from "./instances/instanceRoutes.js";
 
 export function buildApp() {
   const app = Fastify({
@@ -15,11 +16,7 @@ export function buildApp() {
     };
   });
 
-  app.get("/api/instances", async () => {
-    return {
-      instances: [],
-    };
-  });
+  void registerInstanceRoutes(app);
 
   return app;
 }

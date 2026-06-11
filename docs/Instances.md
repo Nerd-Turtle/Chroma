@@ -18,7 +18,6 @@ An Instance includes:
 
 - Backend ID
 - Friendly name
-- Optional slug
 - Bedrock Dedicated Server version
 - Server settings
 - Active world
@@ -113,21 +112,6 @@ Friendly names do not need to be globally unique at the filesystem level because
 
 The UI may warn about duplicate friendly names, but duplicate names should not break the backend.
 
-## Slugs
-
-A slug is an optional filesystem-safe or URL-safe version of the friendly name.
-
-Example:
-
-```text
-Friendly name: Kids Survival
-Slug: kids-survival
-```
-
-The slug may be useful for display, logs, or readable labels, but it should not be treated as the primary unique identifier.
-
-Changing a friendly name should not require moving the Instance directory.
-
 ## Instance Paths
 
 In production, Instance data should live under:
@@ -202,7 +186,6 @@ Example metadata fields:
 ```text
 id
 friendlyName
-slug
 bdsVersion
 status
 createdAt
@@ -224,7 +207,6 @@ export type InstanceStatus =
 export type Instance = {
   id: string;
   friendlyName: string;
-  slug: string;
   status: InstanceStatus;
   bdsVersion: string;
   instancePath: string;
