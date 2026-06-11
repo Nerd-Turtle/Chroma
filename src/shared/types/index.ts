@@ -1,3 +1,4 @@
 export type { Instance, InstanceStatus } from "./instance.js";
 export type { AddonSource, InstanceAddon, InstanceAddonStatus } from "./addon.js";
 export type { Job, JobStatus } from "./job.js";
+export type { BdsInstall, BdsInstallStatus } from "./bds.js";

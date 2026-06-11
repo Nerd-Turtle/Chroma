@@ -1,14 +1,16 @@
 import type { FastifyInstance } from "fastify";
+import type { Database } from "better-sqlite3";
 import {
   createInstance,
   getInstance,
   listInstances,
 } from "./instanceService.js";
+import { registerBdsRoutes } from "../bds/bdsRoutes.js";
 
-export async function registerInstanceRoutes(app: FastifyInstance) {
+export async function registerInstanceRoutes(app: FastifyInstance, db: Database) {
   app.get("/api/instances", async () => {
     return {
-      instances: listInstances(),
+      instances: listInstances(db),
     };
   });
 
@@ -30,7 +32,7 @@ export async function registerInstanceRoutes(app: FastifyInstance) {
       });
     }
 
-    const instance = await createInstance({
+    const instance = await createInstance(db, {
       friendlyName: body.friendlyName.trim(),
       bdsVersion: body.bdsVersion.trim(),
     });
@@ -45,7 +47,7 @@ export async function registerInstanceRoutes(app: FastifyInstance) {
       instanceId: string;
     };
 
-    const instance = getInstance(params.instanceId);
+    const instance = getInstance(db, params.instanceId);
 
     if (!instance) {
       return reply.code(404).send({
@@ -57,4 +59,6 @@ export async function registerInstanceRoutes(app: FastifyInstance) {
       instance,
     };
   });
+
+  void registerBdsRoutes(app, db);
 }

@@ -1,3 +1,5 @@
+import { mkdir } from "node:fs/promises";
+
 export type RuntimePaths = {
   appDir: string;
   configDir: string;
@@ -23,4 +25,16 @@ export function getRuntimePaths(): RuntimePaths {
     dataDir: process.env.CHROMA_DATA_DIR ?? "/var/lib/chroma",
     logDir: process.env.CHROMA_LOG_DIR ?? "/var/log/chroma",
   };
+}
+
+export function getDatabasePath(): string {
+  const runtime = getRuntimePaths();
+  return `${runtime.dataDir}/chroma.sqlite`;
+}
+
+export async function ensureRuntimePaths(): Promise<void> {
+  const runtime = getRuntimePaths();
+  await Promise.all(
+    Object.values(runtime).map((dir) => mkdir(dir, { recursive: true }))
+  );
 }

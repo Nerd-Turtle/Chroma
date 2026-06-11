@@ -1,8 +1,9 @@
+import type { Database } from "better-sqlite3";
 import Fastify from "fastify";
-import { getRuntimePaths } from "./config/paths.js";
+import { getDatabasePath, getRuntimePaths } from "./config/paths.js";
 import { registerInstanceRoutes } from "./instances/instanceRoutes.js";
 
-export function buildApp() {
+export function buildApp(db: Database) {
   const app = Fastify({
     logger: true,
   });
@@ -12,11 +13,15 @@ export function buildApp() {
       status: "ok",
       app: "chroma",
       name: "Chroma Server Manager",
+      database: {
+        status: "ok",
+        path: getDatabasePath(),
+      },
       runtime: getRuntimePaths(),
     };
   });
 
-  void registerInstanceRoutes(app);
+  void registerInstanceRoutes(app, db);
 
   return app;
 }

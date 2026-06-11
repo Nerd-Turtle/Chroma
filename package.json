@@ -20,11 +20,15 @@
   "license": "UNLICENSED",
   "packageManager": "pnpm@11.5.3",
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^25.9.2",
+    "@types/yauzl": "^3.3.0",
     "tsx": "^4.22.4",
     "typescript": "^6.0.3"
   },
   "dependencies": {
-    "fastify": "^5.8.5"
+    "better-sqlite3": "^12.10.0",
+    "fastify": "^5.8.5",
+    "yauzl": "^3.4.0"
   }
 }
