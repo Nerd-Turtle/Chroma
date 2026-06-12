@@ -23,5 +23,25 @@ export function runMigrations(db: Database): void {
       error TEXT,
       FOREIGN KEY (instance_id) REFERENCES instances(id) ON DELETE CASCADE
     );
+
+    CREATE TABLE IF NOT EXISTS instance_server_settings (
+      instance_id TEXT PRIMARY KEY,
+      server_name TEXT NOT NULL,
+      gamemode TEXT NOT NULL,
+      difficulty TEXT NOT NULL,
+      allow_cheats INTEGER NOT NULL,
+      max_players INTEGER NOT NULL,
+      online_mode INTEGER NOT NULL,
+      server_port INTEGER NOT NULL,
+      server_port_v6 INTEGER NOT NULL,
+      view_distance INTEGER NOT NULL,
+      tick_distance INTEGER NOT NULL,
+      default_player_permission_level TEXT NOT NULL,
+      texturepack_required INTEGER NOT NULL,
+      player_idle_timeout INTEGER NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (instance_id) REFERENCES instances(id) ON DELETE CASCADE
+    );
   `);
 }

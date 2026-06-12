@@ -8,6 +8,7 @@ import {
   listInstances as listInstancesFromDb,
   saveInstance as saveInstanceToDb,
 } from "./instanceRepository.js";
+import { createDefaultSettingsForInstance } from "./instanceSettingsService.js";
 
 export type CreateInstanceInput = {
   friendlyName: string;
@@ -42,6 +43,17 @@ export async function createInstance(
 
   await createInstanceDirectories(instance);
   saveInstanceToDb(db, instance);
+
+  // Create default server settings and render server.properties
+  try {
+    await createDefaultSettingsForInstance(db, id);
+  } catch (error) {
+    // Do not fail instance creation if settings writing fails; log to console
+    // The server will still report the instance but settings can be retried.
+    // Avoid throwing raw errors to clients.
+    // eslint-disable-next-line no-console
+    console.error("Failed to create default settings for instance", { instanceId: id, error });
+  }
 
   return instance;
 }

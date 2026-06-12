@@ -6,6 +6,7 @@ import {
   listInstances,
 } from "./instanceService.js";
 import { registerBdsRoutes } from "../bds/bdsRoutes.js";
+import { registerInstanceSettingsRoutes } from "./instanceSettingsRoutes.js";
 
 export async function registerInstanceRoutes(app: FastifyInstance, db: Database) {
   app.get("/api/instances", async () => {
@@ -61,4 +62,5 @@ export async function registerInstanceRoutes(app: FastifyInstance, db: Database)
   });
 
   void registerBdsRoutes(app, db);
+  void registerInstanceSettingsRoutes(app, db);
 }

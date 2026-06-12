@@ -91,3 +91,9 @@ export function saveInstance(db: Database, instance: Instance): void {
     updated_at: instance.updatedAt,
   });
 }
+
+export function updateInstanceStatus(db: Database, instanceId: string, status: Instance["status"]): void {
+  db.prepare(
+    `UPDATE instances SET status = ?, updated_at = ? WHERE id = ?`
+  ).run(status, new Date().toISOString(), instanceId);
+}

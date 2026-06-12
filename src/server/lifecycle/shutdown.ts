@@ -1,6 +1,8 @@
 import type { FastifyInstance } from "fastify";
 import type { Database } from "better-sqlite3";
 
+import { stopAllBdsProcesses } from "../bds/bdsRuntimeService.js";
+
 export function setupShutdownHandlers(app: FastifyInstance, db: Database): void {
   let isShuttingDown = false;
 
@@ -11,6 +13,13 @@ export function setupShutdownHandlers(app: FastifyInstance, db: Database): void 
 
     isShuttingDown = true;
     app.log.info({ signal }, "Shutting down Chroma");
+
+    try {
+      await stopAllBdsProcesses();
+      app.log.info("All BDS processes have been asked to stop");
+    } catch (error) {
+      app.log.error({ error }, "Failed to stop BDS processes cleanly");
+    }
 
     try {
       await app.close();

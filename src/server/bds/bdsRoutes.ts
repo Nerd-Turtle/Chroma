@@ -4,6 +4,12 @@ import {
   getBdsStatusForInstance,
   installBdsForInstance,
 } from "./bdsInstallService.js";
+import {
+  getBdsRuntimeState,
+  startBdsForInstance,
+  stopBdsForInstance,
+  restartBdsForInstance,
+} from "./bdsRuntimeService.js";
 
 export async function registerBdsRoutes(app: FastifyInstance, db: Database) {
   app.get("/api/instances/:instanceId/bds/status", async (request, reply) => {
@@ -16,6 +22,61 @@ export async function registerBdsRoutes(app: FastifyInstance, db: Database) {
       return { bds };
     } catch (error) {
       return reply.code(404).send({ error: "Instance not found" });
+    }
+  });
+
+  app.get("/api/instances/:instanceId/bds/runtime", async (request, reply) => {
+    const params = request.params as {
+      instanceId: string;
+    };
+
+    try {
+      const runtime = await getBdsRuntimeState(db, params.instanceId);
+      return { runtime };
+    } catch (error) {
+      return reply.code(404).send({ error: "Instance not found" });
+    }
+  });
+
+  app.post("/api/instances/:instanceId/bds/start", async (request, reply) => {
+    const params = request.params as {
+      instanceId: string;
+    };
+
+    try {
+      const runtime = await startBdsForInstance(db, params.instanceId);
+      return { runtime };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return reply.code(400).send({ error: message });
+    }
+  });
+
+  app.post("/api/instances/:instanceId/bds/stop", async (request, reply) => {
+    const params = request.params as {
+      instanceId: string;
+    };
+
+    try {
+      const runtime = await stopBdsForInstance(db, params.instanceId);
+      return { runtime };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return reply.code(400).send({ error: message });
+    }
+  });
+
+  app.post("/api/instances/:instanceId/bds/restart", async (request, reply) => {
+    const params = request.params as {
+      instanceId: string;
+    };
+
+    try {
+      const runtime = await restartBdsForInstance(db, params.instanceId);
+      return { runtime };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return reply.code(400).send({ error: message });
     }
   });
 
