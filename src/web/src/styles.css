@@ -1,0 +1,256 @@
+:root {
+  color-scheme: dark;
+  font-family: "Segoe UI", "Helvetica Neue", sans-serif;
+  background:
+    radial-gradient(circle at top, rgba(89, 176, 255, 0.18), transparent 32%),
+    linear-gradient(180deg, #040507 0%, #0c1017 48%, #06070a 100%);
+  color: #f5f7fb;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: transparent;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+.app-shell {
+  min-height: 100vh;
+}
+
+.top-nav {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 1rem;
+  align-items: center;
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(8, 10, 14, 0.78);
+  backdrop-filter: blur(18px);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.brand-lockup {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+}
+
+.brand-mark {
+  width: 2.2rem;
+  height: 2.2rem;
+  border-radius: 0.8rem;
+  background: linear-gradient(135deg, #74d8ff 0%, #a77cff 48%, #ffca6d 100%);
+  box-shadow: 0 0 32px rgba(110, 194, 255, 0.28);
+}
+
+.brand-name {
+  font-size: 1.1rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.brand-subtitle,
+.user-name,
+.lead,
+.stat-card p {
+  color: #a9b3c4;
+}
+
+.brand-subtitle {
+  font-size: 0.85rem;
+}
+
+.top-links {
+  display: flex;
+  justify-content: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.nav-link {
+  padding: 0.5rem 0.85rem;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  color: #eef2fb;
+}
+
+.nav-link.active {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.09);
+}
+
+.nav-link.muted {
+  color: #6e7788;
+}
+
+.user-panel {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.75rem;
+}
+
+.page-frame {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 2rem 1.5rem 3rem;
+}
+
+.page-panel {
+  background: rgba(14, 17, 23, 0.88);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 1.35rem;
+  padding: 1.6rem;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.28);
+}
+
+.hero-panel {
+  margin-bottom: 1.25rem;
+}
+
+.eyebrow {
+  margin: 0 0 0.4rem;
+  color: #84b8ff;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  font-size: 0.76rem;
+}
+
+h1,
+h2,
+p {
+  margin-top: 0;
+}
+
+h1 {
+  font-size: clamp(2rem, 4vw, 3.25rem);
+  margin-bottom: 0.8rem;
+}
+
+h2 {
+  font-size: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.lead {
+  max-width: 48rem;
+  line-height: 1.6;
+}
+
+.form-grid {
+  display: grid;
+  gap: 1rem;
+}
+
+.form-grid label {
+  display: grid;
+  gap: 0.45rem;
+  color: #d8deea;
+}
+
+.form-grid input {
+  width: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+  color: #f6f7fb;
+  border-radius: 0.9rem;
+  padding: 0.9rem 1rem;
+}
+
+.form-grid input:focus {
+  outline: 2px solid rgba(125, 197, 255, 0.45);
+  outline-offset: 1px;
+}
+
+.form-error {
+  color: #ffbebd;
+  background: rgba(130, 26, 26, 0.22);
+  border: 1px solid rgba(255, 109, 109, 0.24);
+  border-radius: 0.95rem;
+  padding: 0.9rem 1rem;
+}
+
+.primary-button,
+.secondary-button {
+  border: 0;
+  border-radius: 999px;
+  padding: 0.82rem 1.15rem;
+  color: #fefefe;
+}
+
+.primary-button {
+  background: linear-gradient(135deg, #6bd0ff 0%, #9370ff 52%, #f2bd63 100%);
+  font-weight: 700;
+}
+
+.secondary-button {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.status-row {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.45rem 0.8rem;
+  border-radius: 999px;
+  background: rgba(126, 182, 255, 0.14);
+  border: 1px solid rgba(126, 182, 255, 0.16);
+}
+
+.status-chip.subtle {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.dashboard-layout {
+  display: grid;
+  gap: 1.25rem;
+}
+
+.dashboard-grid {
+  display: grid;
+  gap: 1rem;
+}
+
+.stat-card strong {
+  display: block;
+  font-size: 2rem;
+  margin-bottom: 0.5rem;
+}
+
+@media (min-width: 820px) {
+  .dashboard-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 860px) {
+  .top-nav {
+    grid-template-columns: 1fr;
+  }
+
+  .top-links,
+  .user-panel {
+    justify-content: flex-start;
+  }
+}

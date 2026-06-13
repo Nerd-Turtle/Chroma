@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import type { Database } from "better-sqlite3";
+import { requireAuthenticated } from "../auth/authGuard.js";
 import {
   createInstance,
   getInstance,
@@ -9,58 +10,62 @@ import { registerBdsRoutes } from "../bds/bdsRoutes.js";
 import { registerInstanceSettingsRoutes } from "./instanceSettingsRoutes.js";
 
 export async function registerInstanceRoutes(app: FastifyInstance, db: Database) {
-  app.get("/api/instances", async () => {
-    return {
-      instances: listInstances(db),
-    };
-  });
+  void app.register(async (protectedApp) => {
+    protectedApp.addHook("preHandler", requireAuthenticated(db));
 
-  app.post("/api/instances", async (request, reply) => {
-    const body = request.body as {
-      friendlyName?: unknown;
-      bdsVersion?: unknown;
-    };
-
-    if (typeof body.friendlyName !== "string" || body.friendlyName.trim() === "") {
-      return reply.code(400).send({
-        error: "friendlyName is required",
-      });
-    }
-
-    if (typeof body.bdsVersion !== "string" || body.bdsVersion.trim() === "") {
-      return reply.code(400).send({
-        error: "bdsVersion is required",
-      });
-    }
-
-    const instance = await createInstance(db, {
-      friendlyName: body.friendlyName.trim(),
-      bdsVersion: body.bdsVersion.trim(),
+    protectedApp.get("/api/instances", async () => {
+      return {
+        instances: listInstances(db),
+      };
     });
 
-    return reply.code(201).send({
-      instance,
-    });
-  });
+    protectedApp.post("/api/instances", async (request, reply) => {
+      const body = request.body as {
+        friendlyName?: unknown;
+        bdsVersion?: unknown;
+      };
 
-  app.get("/api/instances/:instanceId", async (request, reply) => {
-    const params = request.params as {
-      instanceId: string;
-    };
+      if (typeof body.friendlyName !== "string" || body.friendlyName.trim() === "") {
+        return reply.code(400).send({
+          error: "friendlyName is required",
+        });
+      }
 
-    const instance = getInstance(db, params.instanceId);
+      if (typeof body.bdsVersion !== "string" || body.bdsVersion.trim() === "") {
+        return reply.code(400).send({
+          error: "bdsVersion is required",
+        });
+      }
 
-    if (!instance) {
-      return reply.code(404).send({
-        error: "Instance not found",
+      const instance = await createInstance(db, {
+        friendlyName: body.friendlyName.trim(),
+        bdsVersion: body.bdsVersion.trim(),
       });
-    }
 
-    return {
-      instance,
-    };
+      return reply.code(201).send({
+        instance,
+      });
+    });
+
+    protectedApp.get("/api/instances/:instanceId", async (request, reply) => {
+      const params = request.params as {
+        instanceId: string;
+      };
+
+      const instance = getInstance(db, params.instanceId);
+
+      if (!instance) {
+        return reply.code(404).send({
+          error: "Instance not found",
+        });
+      }
+
+      return {
+        instance,
+      };
+    });
+
+    void registerBdsRoutes(protectedApp, db);
+    void registerInstanceSettingsRoutes(protectedApp, db);
   });
-
-  void registerBdsRoutes(app, db);
-  void registerInstanceSettingsRoutes(app, db);
 }
