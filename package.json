@@ -6,11 +6,8 @@
   "type": "module",
   "scripts": {
     "dev:server": "tsx src/server/index.ts",
-    "dev:web": "vite --host 127.0.0.1 src/web",
-    "build": "tsc",
-    "build:web": "vite build src/web",
-    "preview:web": "vite preview --host 127.0.0.1",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "build": "tsc"
   },
   "keywords": [
     "minecraft",
@@ -24,23 +21,14 @@
   "packageManager": "pnpm@11.5.3",
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
-    "@types/bcryptjs": "^2.4.2",
     "@types/node": "^25.9.2",
-    "@types/react": "^18.3.1",
-    "@types/react-dom": "^18.3.1",
     "@types/yauzl": "^3.3.0",
-    "@vitejs/plugin-react": "^4.3.0",
     "tsx": "^4.22.4",
-    "typescript": "^6.0.3",
-    "vite": "^5.5.1"
+    "typescript": "^6.0.3"
   },
   "dependencies": {
-    "@fastify/cookie": "^8.0.0",
-    "bcryptjs": "^2.4.3",
     "better-sqlite3": "^12.10.0",
     "fastify": "^5.8.5",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
     "yauzl": "^3.4.0"
   }
 }

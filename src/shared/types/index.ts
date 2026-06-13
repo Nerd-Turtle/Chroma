@@ -4,4 +4,3 @@ export type { Job, JobStatus } from "./job.js";
 export type { BdsInstall, BdsInstallStatus } from "./bds.js";
 export type { BdsRuntimeState, BdsRuntimeStatus } from "./bdsRuntime.js";
 export type { BedrockServerSettings, BedrockGameMode, BedrockDifficulty, BedrockPermissionLevel } from "./serverSettings.js";
-export type { User, AuthUser, SessionRecord, UserRole } from "./auth.js";
