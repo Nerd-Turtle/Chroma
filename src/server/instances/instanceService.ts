@@ -9,10 +9,23 @@ import {
   saveInstance as saveInstanceToDb,
 } from "./instanceRepository.js";
 import { createDefaultSettingsForInstance } from "./instanceSettingsService.js";
+import { installBdsForInstance } from "../bds/bdsInstallService.js";
 
 export type CreateInstanceInput = {
   friendlyName: string;
   bdsVersion: string;
+  automaticUpdatesEnabled: boolean;
+  updateCheckFrequency: Instance["updateCheckFrequency"];
+  updateCheckTime: string;
+  updateCheckWeekday: Instance["updateCheckWeekday"];
+};
+
+export type UpdateInstanceInput = {
+  friendlyName: string;
+  automaticUpdatesEnabled: boolean;
+  updateCheckFrequency: Instance["updateCheckFrequency"];
+  updateCheckTime: string;
+  updateCheckWeekday: Instance["updateCheckWeekday"];
 };
 
 export function listInstances(db: Database): Instance[] {
@@ -21,6 +34,28 @@ export function listInstances(db: Database): Instance[] {
 
 export function getInstance(db: Database, instanceId: string): Instance | undefined {
   return getInstanceFromDb(db, instanceId);
+}
+
+export function updateInstance(
+  db: Database,
+  instanceId: string,
+  input: UpdateInstanceInput,
+): Instance | undefined {
+  const instance = getInstanceFromDb(db, instanceId);
+
+  if (!instance) {
+    return undefined;
+  }
+
+  instance.friendlyName = input.friendlyName;
+  instance.automaticUpdatesEnabled = input.automaticUpdatesEnabled;
+  instance.updateCheckFrequency = input.updateCheckFrequency;
+  instance.updateCheckTime = input.updateCheckTime;
+  instance.updateCheckWeekday = input.updateCheckWeekday;
+  instance.updatedAt = new Date().toISOString();
+
+  saveInstanceToDb(db, instance);
+  return instance;
 }
 
 export async function createInstance(
@@ -36,6 +71,10 @@ export async function createInstance(
     friendlyName: input.friendlyName,
     status: "stopped",
     bdsVersion: input.bdsVersion,
+    automaticUpdatesEnabled: input.automaticUpdatesEnabled,
+    updateCheckFrequency: input.updateCheckFrequency,
+    updateCheckTime: input.updateCheckTime,
+    updateCheckWeekday: input.updateCheckWeekday,
     instancePath: `${runtimePaths.dataDir}/instances/${id}`,
     createdAt: now,
     updatedAt: now,
@@ -53,6 +92,24 @@ export async function createInstance(
     // Avoid throwing raw errors to clients.
     // eslint-disable-next-line no-console
     console.error("Failed to create default settings for instance", { instanceId: id, error });
+  }
+
+  // Automatically install the latest BDS build for a newly created instance,
+  // but do not start the server process as part of creation.
+  try {
+    const install = await installBdsForInstance(db, id);
+
+    if (install.version && install.version !== instance.bdsVersion) {
+      instance.bdsVersion = install.version;
+      instance.updatedAt = new Date().toISOString();
+      saveInstanceToDb(db, instance);
+    }
+  } catch (error) {
+    // Do not fail instance creation if BDS installation fails.
+    // The install error is persisted by the BDS install service and can be
+    // surfaced to the UI for retry or troubleshooting.
+    // eslint-disable-next-line no-console
+    console.error("Failed to auto-install BDS for instance", { instanceId: id, error });
   }
 
   return instance;

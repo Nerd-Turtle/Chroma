@@ -1,10 +1,21 @@
 import type {
   AuthSessionResponse,
+  CreateInstanceRequest,
   DashboardSummary,
+  InstanceBdsRuntimeResponse,
+  InstanceBackupResponse,
+  InstanceBdsStatusResponse,
+  InstanceDetailResponse,
+  InstanceServerPropertiesResponse,
+  InstanceListResponse,
+  InstanceSettingsResponse,
+  LatestBdsVersionResponse,
   LoginRequest,
   LoginResponse,
   SetupCompleteRequest,
   SetupStatusResponse,
+  UpdateInstanceRequest,
+  UpdateInstanceServerPropertiesRequest,
 } from "../../../shared/types/index.js";
 
 async function readJson<T>(response: Response): Promise<T> {
@@ -56,4 +67,100 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
   const response = await fetch("/api/dashboard/summary");
   const result = await readJson<{ summary: DashboardSummary }>(response);
   return result.summary;
+}
+
+export async function getInstances(): Promise<InstanceListResponse> {
+  const response = await fetch("/api/instances");
+  return readJson<InstanceListResponse>(response);
+}
+
+export async function getInstance(instanceId: string): Promise<InstanceDetailResponse> {
+  const response = await fetch(`/api/instances/${instanceId}`);
+  return readJson<InstanceDetailResponse>(response);
+}
+
+export async function createInstance(payload: CreateInstanceRequest): Promise<InstanceDetailResponse> {
+  const response = await fetch("/api/instances", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  return readJson<InstanceDetailResponse>(response);
+}
+
+export async function updateInstance(instanceId: string, payload: UpdateInstanceRequest): Promise<InstanceDetailResponse> {
+  const response = await fetch(`/api/instances/${instanceId}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  return readJson<InstanceDetailResponse>(response);
+}
+
+export async function getInstanceSettings(instanceId: string): Promise<InstanceSettingsResponse> {
+  const response = await fetch(`/api/instances/${instanceId}/settings`);
+  return readJson<InstanceSettingsResponse>(response);
+}
+
+export async function getInstanceServerProperties(instanceId: string): Promise<InstanceServerPropertiesResponse> {
+  const response = await fetch(`/api/instances/${instanceId}/server-properties`);
+  return readJson<InstanceServerPropertiesResponse>(response);
+}
+
+export async function updateInstanceServerProperties(
+  instanceId: string,
+  payload: UpdateInstanceServerPropertiesRequest,
+): Promise<InstanceServerPropertiesResponse> {
+  const response = await fetch(`/api/instances/${instanceId}/server-properties`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  return readJson<InstanceServerPropertiesResponse>(response);
+}
+
+export async function getInstanceBdsStatus(instanceId: string): Promise<InstanceBdsStatusResponse> {
+  const response = await fetch(`/api/instances/${instanceId}/bds/status`);
+  return readJson<InstanceBdsStatusResponse>(response);
+}
+
+export async function getInstanceBdsRuntime(instanceId: string): Promise<InstanceBdsRuntimeResponse> {
+  const response = await fetch(`/api/instances/${instanceId}/bds/runtime`);
+  return readJson<InstanceBdsRuntimeResponse>(response);
+}
+
+export async function startInstanceBds(instanceId: string): Promise<InstanceBdsRuntimeResponse> {
+  const response = await fetch(`/api/instances/${instanceId}/bds/start`, {
+    method: "POST",
+  });
+  return readJson<InstanceBdsRuntimeResponse>(response);
+}
+
+export async function stopInstanceBds(instanceId: string): Promise<InstanceBdsRuntimeResponse> {
+  const response = await fetch(`/api/instances/${instanceId}/bds/stop`, {
+    method: "POST",
+  });
+  return readJson<InstanceBdsRuntimeResponse>(response);
+}
+
+export async function restartInstanceBds(instanceId: string): Promise<InstanceBdsRuntimeResponse> {
+  const response = await fetch(`/api/instances/${instanceId}/bds/restart`, {
+    method: "POST",
+  });
+  return readJson<InstanceBdsRuntimeResponse>(response);
+}
+
+export async function createExportBackup(instanceId: string): Promise<InstanceBackupResponse> {
+  const response = await fetch(`/api/instances/${instanceId}/backups/export`, {
+    method: "POST",
+  });
+  return readJson<InstanceBackupResponse>(response);
+}
+
+export async function getLatestBdsVersion(): Promise<LatestBdsVersionResponse> {
+  const response = await fetch("/api/bds/latest");
+  return readJson<LatestBdsVersionResponse>(response);
 }

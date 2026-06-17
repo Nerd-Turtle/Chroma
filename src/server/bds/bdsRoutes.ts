@@ -1,6 +1,9 @@
 import type { FastifyInstance } from "fastify";
 import type { Database } from "better-sqlite3";
 import {
+  discoverBdsDownloadUrl,
+} from "./bdsDiscoveryService.js";
+import {
   getBdsStatusForInstance,
   installBdsForInstance,
 } from "./bdsInstallService.js";
@@ -12,6 +15,15 @@ import {
 } from "./bdsRuntimeService.js";
 
 export async function registerBdsRoutes(app: FastifyInstance, db: Database) {
+  app.get("/api/bds/latest", async (_request, reply) => {
+    try {
+      return await discoverBdsDownloadUrl();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return reply.code(500).send({ error: message });
+    }
+  });
+
   app.get("/api/instances/:instanceId/bds/status", async (request, reply) => {
     const params = request.params as {
       instanceId: string;

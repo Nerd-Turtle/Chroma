@@ -76,6 +76,10 @@ export async function restartBdsForInstance(db: Database, instanceId: string): P
   return runtimeState;
 }
 
+export function sendBdsCommand(instanceId: string, command: string): boolean {
+  return processManager.sendCommand(instanceId, command);
+}
+
 export async function stopAllBdsProcesses(): Promise<void> {
   await processManager.stopAll();
 }

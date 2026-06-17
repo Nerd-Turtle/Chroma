@@ -221,6 +221,17 @@ export class BdsProcessManager {
     };
   }
 
+  sendCommand(instanceId: string, command: string): boolean {
+    const child = this.processes.get(instanceId);
+
+    if (!child || !child.stdin.writable) {
+      return false;
+    }
+
+    child.stdin.write(`${command}\n`);
+    return true;
+  }
+
   async stopAll(): Promise<void> {
     const stopPromises = Array.from(this.processes.keys()).map((instanceId) => this.stop(instanceId));
     await Promise.all(stopPromises);

@@ -2,12 +2,13 @@ import type { AuthUser } from "../../../shared/types/index.js";
 
 type TopNavProps = {
   authenticated: boolean;
-  activePage: "setup" | "login" | "dashboard";
+  activePage: "setup" | "login" | "dashboard" | "instances";
   user: AuthUser | null;
   onLogout: () => void;
+  onNavigate: (page: "dashboard" | "instances") => void;
 };
 
-const TopNav = ({ authenticated, activePage, user, onLogout }: TopNavProps) => {
+const TopNav = ({ authenticated, activePage, user, onLogout, onNavigate }: TopNavProps) => {
   return (
     <header className="top-nav">
       <div className="brand-lockup">
@@ -18,25 +19,39 @@ const TopNav = ({ authenticated, activePage, user, onLogout }: TopNavProps) => {
         </div>
       </div>
 
-      <nav className="top-links" aria-label="Primary">
-        <span className={activePage === "dashboard" ? "nav-link active" : "nav-link"}>Dashboard</span>
-        <span className="nav-link muted">Instances</span>
-        <span className="nav-link muted">Addons</span>
-        <span className="nav-link muted">Settings</span>
-      </nav>
+      {authenticated ? (
+        <nav className="top-links" aria-label="Primary">
+          <button
+            type="button"
+            className={activePage === "dashboard" ? "nav-link active" : "nav-link"}
+            onClick={() => onNavigate("dashboard")}
+          >
+            Dashboard
+          </button>
+          <button
+            type="button"
+            className={activePage === "instances" ? "nav-link active" : "nav-link"}
+            onClick={() => onNavigate("instances")}
+          >
+            Instances
+          </button>
+          <span className="nav-link muted">Addons</span>
+          <span className="nav-link muted">Settings</span>
+        </nav>
+      ) : (
+        <div />
+      )}
 
-      <div className="user-panel">
-        {authenticated && user ? (
-          <>
-            <span className="user-name">{user.username}</span>
-            <button type="button" className="secondary-button" onClick={onLogout}>
-              Logout
-            </button>
-          </>
-        ) : (
-          <span className="user-name">{activePage === "setup" ? "First-start setup" : "Local login"}</span>
-        )}
-      </div>
+      {authenticated && user ? (
+        <div className="user-panel">
+          <span className="user-name">{user.username}</span>
+          <button type="button" className="secondary-button" onClick={onLogout}>
+            Logout
+          </button>
+        </div>
+      ) : (
+        <div />
+      )}
     </header>
   );
 };

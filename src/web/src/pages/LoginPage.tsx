@@ -31,10 +31,8 @@ const LoginPage = ({ onLoginSuccess }: LoginPageProps) => {
   };
 
   return (
-    <section className="page-panel">
-      <p className="eyebrow">Local authentication</p>
+    <section className="page-panel setup-panel">
       <h1>Sign in to Chroma</h1>
-      <p className="lead">Use the local admin account created during setup to reach the dashboard.</p>
 
       <form className="form-grid" onSubmit={handleSubmit}>
         <label>

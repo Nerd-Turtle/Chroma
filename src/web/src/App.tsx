@@ -3,10 +3,28 @@ import type { AuthUser } from "../../shared/types/index.js";
 import { getSession, getSetupStatus, logout } from "./api/chromaApi.js";
 import TopNav from "./components/TopNav.js";
 import DashboardPage from "./pages/DashboardPage.js";
+import InstancesPage from "./pages/InstancesPage.js";
 import LoginPage from "./pages/LoginPage.js";
 import SetupPage from "./pages/SetupPage.js";
 
-type AppPage = "setup" | "login" | "dashboard";
+type AppPage = "setup" | "login" | "dashboard" | "instances";
+
+function getWorkspacePageFromHash(): "dashboard" | "instances" | null {
+  const hash = window.location.hash.replace(/^#/, "");
+
+  if (hash === "dashboard" || hash === "instances") {
+    return hash;
+  }
+
+  return null;
+}
+
+function syncWorkspaceHash(page: "dashboard" | "instances"): void {
+  const nextHash = `#${page}`;
+  if (window.location.hash !== nextHash) {
+    window.location.hash = nextHash;
+  }
+}
 
 const App = () => {
   const [page, setPage] = useState<AppPage>("login");
@@ -25,7 +43,7 @@ const App = () => {
       const session = await getSession();
       if (session.authenticated) {
         setUser(session.user);
-        setPage("dashboard");
+        setPage(getWorkspacePageFromHash() ?? "dashboard");
       } else {
         setPage("login");
       }
@@ -36,26 +54,56 @@ const App = () => {
     void initializeApp();
   }, []);
 
+  useEffect(() => {
+    function handleHashChange() {
+      if (!user) {
+        return;
+      }
+
+      const nextPage = getWorkspacePageFromHash();
+      if (nextPage) {
+        setPage(nextPage);
+      }
+    }
+
+    window.addEventListener("hashchange", handleHashChange);
+    return () => window.removeEventListener("hashchange", handleHashChange);
+  }, [user]);
+
   const handleLogout = async () => {
     await logout();
     setUser(null);
     setPage("login");
+    if (window.location.hash) {
+      window.history.replaceState(null, "", window.location.pathname + window.location.search);
+    }
   };
 
-  const isAuthenticated = page === "dashboard" && user !== null;
+  const isAuthenticated = user !== null && page !== "setup" && page !== "login";
 
   return (
     <div className="app-shell">
-      <TopNav authenticated={isAuthenticated} activePage={page} user={user} onLogout={() => void handleLogout()} />
+      <TopNav
+        authenticated={isAuthenticated}
+        activePage={page}
+        user={user}
+        onLogout={() => void handleLogout()}
+        onNavigate={(nextPage) => {
+          setPage(nextPage);
+          syncWorkspaceHash(nextPage);
+        }}
+      />
 
-      <main className="page-frame">
+      <main className={page === "instances" ? "page-frame page-frame-workspace" : "page-frame"}>
         {loading ? <section className="page-panel">Loading Chroma...</section> : null}
         {!loading && page === "setup" ? <SetupPage onSetupComplete={() => setPage("login")} /> : null}
         {!loading && page === "login" ? <LoginPage onLoginSuccess={(nextUser: AuthUser) => {
           setUser(nextUser);
           setPage("dashboard");
+          syncWorkspaceHash("dashboard");
         }} /> : null}
         {!loading && page === "dashboard" && user ? <DashboardPage user={user} /> : null}
+        {!loading && page === "instances" && user ? <InstancesPage /> : null}
       </main>
     </div>
   );

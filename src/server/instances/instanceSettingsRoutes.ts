@@ -1,8 +1,9 @@
 import type { FastifyInstance } from "fastify";
 import type { Database } from "better-sqlite3";
-import type { BedrockServerSettings } from "../../shared/types/serverSettings.js";
+import type { BedrockServerSettings, UpdateInstanceServerPropertiesRequest } from "../../shared/types/index.js";
 import { getSettings, saveSettingsAndRender } from "./instanceSettingsService.js";
 import { getInstance } from "./instanceService.js";
+import { getServerPropertiesEditorPayload, saveServerPropertiesFromEditor } from "./serverPropertiesEditorService.js";
 
 function isValidPort(n: unknown): n is number {
   return typeof n === "number" && Number.isInteger(n) && n >= 1 && n <= 65535;
@@ -111,5 +112,34 @@ export function registerInstanceSettingsRoutes(app: FastifyInstance, db: Databas
     }
 
     return { settings: merged, restartRequired: true };
+  });
+
+  app.get("/api/instances/:instanceId/server-properties", async (request, reply) => {
+    const params = request.params as { instanceId: string };
+
+    try {
+      return await getServerPropertiesEditorPayload(db, params.instanceId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const statusCode = message === "Instance not found" || message === "Settings not found" ? 404 : 500;
+      return reply.code(statusCode).send({ error: message });
+    }
+  });
+
+  app.put("/api/instances/:instanceId/server-properties", async (request, reply) => {
+    const params = request.params as { instanceId: string };
+    const body = request.body as Partial<UpdateInstanceServerPropertiesRequest>;
+
+    if (typeof body.content !== "string") {
+      return reply.code(400).send({ error: "content must be a string" });
+    }
+
+    try {
+      return await saveServerPropertiesFromEditor(db, params.instanceId, body.content);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const statusCode = message === "Instance not found" || message === "Settings not found" ? 404 : 500;
+      return reply.code(statusCode).send({ error: message });
+    }
   });
 }

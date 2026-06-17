@@ -7,6 +7,11 @@ export function runMigrations(db: Database): void {
       friendly_name TEXT NOT NULL,
       status TEXT NOT NULL,
       bds_version TEXT NOT NULL,
+      automatic_updates_enabled INTEGER NOT NULL DEFAULT 1,
+      update_check_frequency TEXT NOT NULL DEFAULT 'daily',
+      update_check_time TEXT NOT NULL DEFAULT '03:00',
+      update_check_weekday TEXT NOT NULL DEFAULT 'sunday',
+      last_auto_update_check_at TEXT,
       instance_path TEXT NOT NULL,
       active_world_name TEXT,
       created_at TEXT NOT NULL,
@@ -67,4 +72,27 @@ export function runMigrations(db: Database): void {
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
   `);
+
+  const columns = db.prepare(`PRAGMA table_info(instances)`).all() as Array<{ name: string }>;
+  const columnNames = new Set(columns.map((column) => column.name));
+
+  if (!columnNames.has("automatic_updates_enabled")) {
+    db.exec(`ALTER TABLE instances ADD COLUMN automatic_updates_enabled INTEGER NOT NULL DEFAULT 1;`);
+  }
+
+  if (!columnNames.has("update_check_frequency")) {
+    db.exec(`ALTER TABLE instances ADD COLUMN update_check_frequency TEXT NOT NULL DEFAULT 'daily';`);
+  }
+
+  if (!columnNames.has("update_check_time")) {
+    db.exec(`ALTER TABLE instances ADD COLUMN update_check_time TEXT NOT NULL DEFAULT '03:00';`);
+  }
+
+  if (!columnNames.has("update_check_weekday")) {
+    db.exec(`ALTER TABLE instances ADD COLUMN update_check_weekday TEXT NOT NULL DEFAULT 'sunday';`);
+  }
+
+  if (!columnNames.has("last_auto_update_check_at")) {
+    db.exec(`ALTER TABLE instances ADD COLUMN last_auto_update_check_at TEXT;`);
+  }
 }

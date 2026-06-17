@@ -27,6 +27,7 @@
     "@types/node": "^25.9.2",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
+    "@types/yazl": "^3.3.0",
     "@types/yauzl": "^3.3.0",
     "@vitejs/plugin-react": "^6.0.2",
     "tsx": "^4.22.4",
@@ -37,8 +38,10 @@
     "@fastify/cookie": "^11.0.2",
     "better-sqlite3": "^12.10.0",
     "fastify": "^5.8.5",
+    "lucide-react": "^0.542.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
+    "yazl": "^3.3.1",
     "yauzl": "^3.4.0"
   }
 }

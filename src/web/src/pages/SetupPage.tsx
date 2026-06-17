@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { completeSetup } from "../api/chromaApi.js";
 
 type SetupPageProps = {
@@ -10,12 +10,35 @@ const SetupPage = ({ onSetupComplete }: SetupPageProps) => {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [timezone, setTimezone] = useState("");
+  const [timezoneQuery, setTimezoneQuery] = useState("");
+  const [showTimezoneOptions, setShowTimezoneOptions] = useState(false);
   const [language, setLanguage] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
+  const timezoneOptions = useMemo(() => {
+    if (typeof Intl.supportedValuesOf !== "function") {
+      return ["UTC"];
+    }
+
+    return Intl.supportedValuesOf("timeZone");
+  }, []);
+
+  const filteredTimezoneOptions = useMemo(() => {
+    const normalizedQuery = timezoneQuery.trim().toLowerCase();
+    if (normalizedQuery.length === 0) {
+      return timezoneOptions.slice(0, 12);
+    }
+
+    return timezoneOptions
+      .filter((option) => option.toLowerCase().includes(normalizedQuery))
+      .slice(0, 12);
+  }, [timezoneOptions, timezoneQuery]);
+
   useEffect(() => {
-    setTimezone(Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC");
+    const detectedTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+    setTimezone(detectedTimezone);
+    setTimezoneQuery(detectedTimezone);
     setLanguage(navigator.language || "en-US");
   }, []);
 
@@ -24,6 +47,11 @@ const SetupPage = ({ onSetupComplete }: SetupPageProps) => {
 
     if (password !== confirmPassword) {
       setError("Passwords do not match");
+      return;
+    }
+
+    if (!timezoneOptions.includes(timezone)) {
+      setError("Select a valid timezone from the list");
       return;
     }
 
@@ -46,8 +74,7 @@ const SetupPage = ({ onSetupComplete }: SetupPageProps) => {
   };
 
   return (
-    <section className="page-panel">
-      <p className="eyebrow">Milestone 1.0</p>
+    <section className="page-panel setup-panel">
       <h1>Set up Chroma</h1>
       <p className="lead">
         Create the local admin account and store the basic application settings needed for this install.
@@ -71,12 +98,56 @@ const SetupPage = ({ onSetupComplete }: SetupPageProps) => {
 
         <label>
           Timezone
-          <input value={timezone} onChange={(event) => setTimezone(event.target.value)} />
-        </label>
+          <div className="combobox">
+            <input
+              value={timezoneQuery}
+              onChange={(event) => {
+                const nextValue = event.target.value;
+                setTimezoneQuery(nextValue);
+                setTimezone(nextValue);
+                setShowTimezoneOptions(true);
+              }}
+              onFocus={() => {
+                setShowTimezoneOptions(true);
+                setTimezoneQuery((currentQuery) => (currentQuery === timezone ? "" : currentQuery));
+              }}
+              onBlur={() => {
+                window.setTimeout(() => {
+                  setShowTimezoneOptions(false);
+                  setTimezoneQuery(timezone);
+                }, 120);
+              }}
+              placeholder="Search timezone"
+              role="combobox"
+              aria-expanded={showTimezoneOptions}
+              aria-autocomplete="list"
+              aria-controls="timezone-options"
+            />
 
-        <label>
-          Language
-          <input value={language} onChange={(event) => setLanguage(event.target.value)} />
+            {showTimezoneOptions ? (
+              <div className="combobox-menu" id="timezone-options" role="listbox">
+                {filteredTimezoneOptions.length > 0 ? (
+                  filteredTimezoneOptions.map((option) => (
+                    <button
+                      key={option}
+                      type="button"
+                      className={`combobox-option${option === timezone ? " active" : ""}`}
+                      onMouseDown={(event) => {
+                        event.preventDefault();
+                        setTimezone(option);
+                        setTimezoneQuery(option);
+                        setShowTimezoneOptions(false);
+                      }}
+                    >
+                      {option}
+                    </button>
+                  ))
+                ) : (
+                  <div className="combobox-empty">No matching timezones</div>
+                )}
+              </div>
+            ) : null}
+          </div>
         </label>
 
         {error ? <div className="form-error">{error}</div> : null}
