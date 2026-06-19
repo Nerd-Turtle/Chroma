@@ -2,6 +2,7 @@ import type {
   AuthSessionResponse,
   CreateInstanceRequest,
   DashboardSummary,
+  InstanceBdsManualUpdateResponse,
   InstanceBdsRuntimeResponse,
   InstanceBackupResponse,
   InstanceBdsStatusResponse,
@@ -151,6 +152,13 @@ export async function restartInstanceBds(instanceId: string): Promise<InstanceBd
     method: "POST",
   });
   return readJson<InstanceBdsRuntimeResponse>(response);
+}
+
+export async function manualUpdateInstanceBds(instanceId: string): Promise<InstanceBdsManualUpdateResponse> {
+  const response = await fetch(`/api/instances/${instanceId}/bds/update`, {
+    method: "POST",
+  });
+  return readJson<InstanceBdsManualUpdateResponse>(response);
 }
 
 export async function createExportBackup(instanceId: string): Promise<InstanceBackupResponse> {

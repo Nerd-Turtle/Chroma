@@ -85,6 +85,10 @@ export type InstanceBdsStatusResponse = {
   bds: BdsInstall;
 };
 
+export type InstanceBdsManualUpdateResponse = {
+  bds: BdsInstall;
+};
+
 export type InstanceBdsRuntimeResponse = {
   runtime: BdsRuntimeState;
 };

@@ -13,6 +13,7 @@ import {
   stopBdsForInstance,
   restartBdsForInstance,
 } from "./bdsRuntimeService.js";
+import { runManualUpdateForInstance } from "../instances/instanceAutoUpdateService.js";
 
 export async function registerBdsRoutes(app: FastifyInstance, db: Database) {
   app.get("/api/bds/latest", async (_request, reply) => {
@@ -86,6 +87,20 @@ export async function registerBdsRoutes(app: FastifyInstance, db: Database) {
     try {
       const runtime = await restartBdsForInstance(db, params.instanceId);
       return { runtime };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return reply.code(400).send({ error: message });
+    }
+  });
+
+  app.post("/api/instances/:instanceId/bds/update", async (request, reply) => {
+    const params = request.params as {
+      instanceId: string;
+    };
+
+    try {
+      const bds = await runManualUpdateForInstance(db, app.log, params.instanceId);
+      return { bds };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       return reply.code(400).send({ error: message });

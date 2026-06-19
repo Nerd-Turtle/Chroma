@@ -1,4 +1,4 @@
-import { LoaderCircle, Play, RotateCw, Save, Square } from "lucide-react";
+import { ArrowDownToLine, LoaderCircle, Play, RotateCw, Save, Square } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import type {
   BdsInstall,
@@ -16,6 +16,7 @@ import {
   getInstanceServerProperties,
   getInstanceSettings,
   getLatestBdsVersion,
+  manualUpdateInstanceBds,
   restartInstanceBds,
   startInstanceBds,
   stopInstanceBds,
@@ -44,6 +45,13 @@ type ServerPropertiesEditorState = {
   content: string;
   filePath: string;
   restartRequired: boolean;
+};
+
+type BannerTone = "success" | "warning" | "alert";
+
+type BannerState = {
+  message: string;
+  tone: BannerTone;
 };
 
 function formatTimestamp(value?: string): string {
@@ -148,6 +156,7 @@ function getVersionListStatus(instance: Instance, bds?: BdsInstall, latestBdsVer
 
 const InstancesPage = () => {
   const dragState = useRef<{ startX: number; startWidth: number } | null>(null);
+  const updateMenuRef = useRef<HTMLDivElement | null>(null);
   const [instances, setInstances] = useState<Instance[]>([]);
   const [instanceBdsStatuses, setInstanceBdsStatuses] = useState<Record<string, BdsInstall>>({});
   const [selectedInstanceId, setSelectedInstanceId] = useState<string>("");
@@ -163,7 +172,9 @@ const InstancesPage = () => {
   const [serverPropertiesData, setServerPropertiesData] = useState<ServerPropertiesEditorState | null>(null);
   const [serverPropertiesError, setServerPropertiesError] = useState("");
   const [serverPropertiesNotice, setServerPropertiesNotice] = useState("");
-  const [actionInFlight, setActionInFlight] = useState<"start" | "stop" | "restart" | "backup" | "">("");
+  const [banner, setBanner] = useState<BannerState | null>(null);
+  const [updateMenuOpen, setUpdateMenuOpen] = useState(false);
+  const [actionInFlight, setActionInFlight] = useState<"start" | "stop" | "restart" | "backup" | "check-update" | "update" | "">("");
   const [editingInstance, setEditingInstance] = useState(false);
   const [rightPaneMode, setRightPaneMode] = useState<RightPaneMode>("details");
   const [activeTab, setActiveTab] = useState<RightPaneTab>("overview");
@@ -281,8 +292,36 @@ const InstancesPage = () => {
       setServerPropertiesData(null);
       setServerPropertiesError("");
       setServerPropertiesNotice("");
+      setUpdateMenuOpen(false);
+      setEditingInstance(false);
     }
   }, [rightPaneMode, selectedInstanceId]);
+
+  useEffect(() => {
+    function handlePointerDown(event: PointerEvent) {
+      if (!updateMenuOpen || !updateMenuRef.current) {
+        return;
+      }
+
+      if (!updateMenuRef.current.contains(event.target as Node)) {
+        setUpdateMenuOpen(false);
+      }
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setUpdateMenuOpen(false);
+      }
+    }
+
+    window.addEventListener("pointerdown", handlePointerDown);
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      window.removeEventListener("pointerdown", handlePointerDown);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [updateMenuOpen]);
 
   useEffect(() => {
     setActiveTab("overview");
@@ -348,6 +387,7 @@ const InstancesPage = () => {
     event.preventDefault();
     setCreatingInstance(true);
     setError("");
+    setBanner(null);
 
     try {
       const result = await createInstance({
@@ -382,6 +422,7 @@ const InstancesPage = () => {
 
     setSavingInstance(true);
     setError("");
+    setBanner(null);
 
     try {
       await updateInstance(selectedInstanceId, instanceEditor);
@@ -395,6 +436,21 @@ const InstancesPage = () => {
     }
   };
 
+  const closeInstanceEditor = () => {
+    if (savingInstance || !workspaceData) {
+      return;
+    }
+
+    setEditingInstance(false);
+    setInstanceEditor({
+      friendlyName: workspaceData.instance.friendlyName,
+      automaticUpdatesEnabled: workspaceData.instance.automaticUpdatesEnabled,
+      updateCheckFrequency: workspaceData.instance.updateCheckFrequency,
+      updateCheckTime: workspaceData.instance.updateCheckTime,
+      updateCheckWeekday: workspaceData.instance.updateCheckWeekday,
+    });
+  };
+
   const handleRuntimeAction = async (action: "start" | "stop" | "restart") => {
     if (!selectedInstanceId) {
       return;
@@ -402,6 +458,7 @@ const InstancesPage = () => {
 
     setActionInFlight(action);
     setError("");
+    setBanner(null);
 
     try {
       if (action === "start") {
@@ -428,6 +485,7 @@ const InstancesPage = () => {
 
     setActionInFlight("backup");
     setError("");
+    setBanner(null);
 
     try {
       const backup = await createExportBackup(selectedInstanceId);
@@ -435,6 +493,81 @@ const InstancesPage = () => {
       window.location.href = downloadUrl;
     } catch (backupError) {
       setError(backupError instanceof Error ? backupError.message : "Unable to create backup");
+    } finally {
+      setActionInFlight("");
+    }
+  };
+
+  const handleCheckForUpdates = async () => {
+    if (!selectedInstanceId || !workspaceData) {
+      return;
+    }
+
+    setActionInFlight("check-update");
+    setError("");
+    setBanner(null);
+    setUpdateMenuOpen(false);
+
+    try {
+      const latestResult = await getLatestBdsVersion();
+      setLatestBdsVersion(latestResult.version ?? "");
+      await loadInstances(selectedInstanceId);
+      await refreshSelectedInstance(selectedInstanceId);
+
+      if (!latestResult.version) {
+        setBanner({ message: "Unable to determine the latest BDS version right now.", tone: "warning" });
+        return;
+      }
+
+      if (latestResult.version === workspaceData.instance.bdsVersion) {
+        setBanner({ message: `No updates available. This instance is already on ${latestResult.version}.`, tone: "success" });
+        return;
+      }
+
+      setBanner({
+        message: `Update available: ${latestResult.version}. Current instance version: ${workspaceData.instance.bdsVersion}.`,
+        tone: "warning",
+      });
+    } catch (checkError) {
+      setError(checkError instanceof Error ? checkError.message : "Unable to check for updates");
+    } finally {
+      setActionInFlight("");
+    }
+  };
+
+  const handleManualUpdate = async () => {
+    if (!selectedInstanceId) {
+      return;
+    }
+
+    setActionInFlight("update");
+    setError("");
+    setBanner(null);
+    setUpdateMenuOpen(false);
+
+    try {
+      const latestResult = await getLatestBdsVersion();
+      setLatestBdsVersion(latestResult.version ?? "");
+
+      if (latestResult.version && workspaceData && latestResult.version === workspaceData.instance.bdsVersion) {
+        setBanner({ message: `No updates available. This instance is already on ${latestResult.version}.`, tone: "success" });
+        return;
+      }
+
+      await manualUpdateInstanceBds(selectedInstanceId);
+      await loadInstances(selectedInstanceId);
+      await refreshSelectedInstance(selectedInstanceId);
+      if (activeTab === "properties") {
+        await openServerPropertiesEditor(true);
+      }
+      setBanner({
+        message: latestResult.version
+          ? `Update complete. Instance is now on ${latestResult.version}.`
+          : "Update check completed.",
+        tone: "success",
+      });
+    } catch (updateError) {
+      setError(updateError instanceof Error ? updateError.message : "Unable to update BDS");
     } finally {
       setActionInFlight("");
     }
@@ -526,7 +659,27 @@ const InstancesPage = () => {
 
   return (
     <section className="instances-layout">
-      {error ? <div className="form-error">{error}</div> : null}
+      {error ? (
+        <div className="status-banner status-banner-alert" role="alert">
+          <span>{error}</span>
+          <button type="button" className="status-banner-close" onClick={() => setError("")} aria-label="Dismiss alert">
+            Close
+          </button>
+        </div>
+      ) : null}
+      {banner ? (
+        <div className={`status-banner status-banner-${banner.tone}`} role="status">
+          <span>{banner.message}</span>
+          <button
+            type="button"
+            className="status-banner-close"
+            onClick={() => setBanner(null)}
+            aria-label="Dismiss notification"
+          >
+            Close
+          </button>
+        </div>
+      ) : null}
 
       <section
         className="instances-workspace"
@@ -721,6 +874,44 @@ const InstancesPage = () => {
                       <Save aria-hidden="true" />
                     </ActionIcon>
                   </button>
+                  <div className="instances-update-menu" ref={updateMenuRef}>
+                    <button
+                      type="button"
+                      className="icon-action"
+                      onClick={() => setUpdateMenuOpen((open) => !open)}
+                      disabled={actionInFlight !== ""}
+                      title="Update options"
+                      aria-label="Update options"
+                      aria-expanded={updateMenuOpen}
+                      aria-haspopup="menu"
+                    >
+                      <ActionIcon active={actionInFlight === "check-update" || actionInFlight === "update"}>
+                        <ArrowDownToLine aria-hidden="true" />
+                      </ActionIcon>
+                    </button>
+                    {updateMenuOpen ? (
+                      <div className="instances-update-menu-panel" role="menu" aria-label="Update options">
+                        <button
+                          type="button"
+                          className="instances-update-menu-item"
+                          onClick={() => void handleCheckForUpdates()}
+                          disabled={actionInFlight !== ""}
+                          role="menuitem"
+                        >
+                          Check for updates only
+                        </button>
+                        <button
+                          type="button"
+                          className="instances-update-menu-item"
+                          onClick={() => void handleManualUpdate()}
+                          disabled={actionInFlight !== ""}
+                          role="menuitem"
+                        >
+                          Check and install updates
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
                 </div>
               ) : null}
             </div>
@@ -840,181 +1031,47 @@ const InstancesPage = () => {
             ) : null}
 
             {rightPaneMode === "details" && !detailsLoading && workspaceData ? (
-              <>
+              <div className="instances-detail-body">
+                <div className="instances-detail-toolbar">
+                  <div className="instances-detail-toolbar-spacer" aria-hidden="true" />
+                  <div className="instances-detail-toolbar-actions">
+                    {activeTab === "overview" && !editingInstance ? (
+                      <button type="button" className="secondary-button" onClick={() => setEditingInstance(true)}>
+                        Edit
+                      </button>
+                    ) : null}
+
+                    {activeTab === "properties" ? (
+                      <button type="button" className="secondary-button" onClick={() => void openServerPropertiesEditor()}>
+                        Edit
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+
                 {activeTab === "overview" ? (
                   <div className="instance-details-sections">
                     <section className="instance-detail-section">
-                      <div className="instance-section-header">
-                        <h3>Overview</h3>
-                        {!editingInstance ? (
-                          <button type="button" className="secondary-button" onClick={() => setEditingInstance(true)}>
-                            Edit
-                          </button>
+                      <dl className="instance-detail-list">
+                        <div><dt>Name</dt><dd>{workspaceData.instance.friendlyName}</dd></div>
+                        <div><dt>Automatic updates</dt><dd>{workspaceData.instance.automaticUpdatesEnabled ? "Enabled" : "Disabled"}</dd></div>
+                        <div><dt>Frequency</dt><dd>{workspaceData.instance.updateCheckFrequency}</dd></div>
+                        {workspaceData.instance.automaticUpdatesEnabled && workspaceData.instance.updateCheckFrequency === "weekly" ? (
+                          <div><dt>Check day</dt><dd>{formatWeekday(workspaceData.instance.updateCheckWeekday)}</dd></div>
                         ) : null}
-                      </div>
-                      {!editingInstance ? (
-                        <dl className="instance-detail-list">
-                          <div><dt>Name</dt><dd>{workspaceData.instance.friendlyName}</dd></div>
-                          <div><dt>Automatic updates</dt><dd>{workspaceData.instance.automaticUpdatesEnabled ? "Enabled" : "Disabled"}</dd></div>
-                          <div><dt>Frequency</dt><dd>{workspaceData.instance.updateCheckFrequency}</dd></div>
-                          {workspaceData.instance.automaticUpdatesEnabled && workspaceData.instance.updateCheckFrequency === "weekly" ? (
-                            <div><dt>Check day</dt><dd>{formatWeekday(workspaceData.instance.updateCheckWeekday)}</dd></div>
-                          ) : null}
-                          {workspaceData.instance.automaticUpdatesEnabled ? (
-                            <div><dt>Check time</dt><dd>{workspaceData.instance.updateCheckTime}</dd></div>
-                          ) : null}
-                          <div><dt>Last check</dt><dd>{formatTimestamp(workspaceData.instance.lastAutoUpdateCheckAt)}</dd></div>
-                        </dl>
-                      ) : (
-                        <form className="form-grid" onSubmit={handleSaveInstance}>
-                          <label>
-                            Instance name
-                            <input
-                              value={instanceEditor.friendlyName}
-                              onChange={(event) => setInstanceEditor((current) => ({ ...current, friendlyName: event.target.value }))}
-                            />
-                          </label>
-
-                          <div className="instances-toggle-row">
-                            <div className="instances-toggle-copy">
-                              <strong>Enable automatic updating</strong>
-                              <span>
-                                {instanceEditor.automaticUpdatesEnabled ? "Automatic updating enabled" : "Automatic updating disabled"}
-                              </span>
-                            </div>
-                            <button
-                              type="button"
-                              className={instanceEditor.automaticUpdatesEnabled ? "toggle-switch active" : "toggle-switch"}
-                              aria-pressed={instanceEditor.automaticUpdatesEnabled}
-                              onClick={() =>
-                                setInstanceEditor((current) => ({
-                                  ...current,
-                                  automaticUpdatesEnabled: !current.automaticUpdatesEnabled,
-                                }))
-                              }
-                            >
-                              <span className="toggle-switch-thumb" />
-                            </button>
-                          </div>
-
-                          {instanceEditor.automaticUpdatesEnabled ? (
-                            <div className="instances-schedule-grid">
-                              <label>
-                                Check for updates
-                                <select
-                                  value={instanceEditor.updateCheckFrequency}
-                                  onChange={(event) =>
-                                    setInstanceEditor((current) => ({
-                                      ...current,
-                                      updateCheckFrequency: event.target.value === "weekly" ? "weekly" : "daily",
-                                    }))
-                                  }
-                                >
-                                  <option value="daily">Daily</option>
-                                  <option value="weekly">Weekly</option>
-                                </select>
-                              </label>
-
-                              <label>
-                                Check time
-                                <input
-                                  type="time"
-                                  value={instanceEditor.updateCheckTime}
-                                  onChange={(event) =>
-                                    setInstanceEditor((current) => ({ ...current, updateCheckTime: event.target.value }))
-                                  }
-                                />
-                              </label>
-
-                              {instanceEditor.updateCheckFrequency === "weekly" ? (
-                                <label>
-                                  Check day
-                                  <select
-                                    value={instanceEditor.updateCheckWeekday}
-                                    onChange={(event) =>
-                                      setInstanceEditor((current) => ({
-                                        ...current,
-                                        updateCheckWeekday: event.target.value as InstanceEditorState["updateCheckWeekday"],
-                                      }))
-                                    }
-                                  >
-                                    <option value="monday">Monday</option>
-                                    <option value="tuesday">Tuesday</option>
-                                    <option value="wednesday">Wednesday</option>
-                                    <option value="thursday">Thursday</option>
-                                    <option value="friday">Friday</option>
-                                    <option value="saturday">Saturday</option>
-                                    <option value="sunday">Sunday</option>
-                                  </select>
-                                </label>
-                              ) : null}
-                            </div>
-                          ) : null}
-
-                          <div className="instances-form-actions">
-                            <button type="submit" className="primary-button" disabled={savingInstance}>
-                              {savingInstance ? "Saving..." : "Save"}
-                            </button>
-                            <button
-                              type="button"
-                              className="secondary-button"
-                              onClick={() => {
-                                setEditingInstance(false);
-                                setInstanceEditor({
-                                  friendlyName: workspaceData.instance.friendlyName,
-                                  automaticUpdatesEnabled: workspaceData.instance.automaticUpdatesEnabled,
-                                  updateCheckFrequency: workspaceData.instance.updateCheckFrequency,
-                                  updateCheckTime: workspaceData.instance.updateCheckTime,
-                                  updateCheckWeekday: workspaceData.instance.updateCheckWeekday,
-                                });
-                              }}
-                            >
-                              Cancel
-                            </button>
-                          </div>
-                        </form>
-                      )}
+                        {workspaceData.instance.automaticUpdatesEnabled ? (
+                          <div><dt>Check time</dt><dd>{workspaceData.instance.updateCheckTime}</dd></div>
+                        ) : null}
+                        <div><dt>Last check</dt><dd>{formatTimestamp(workspaceData.instance.lastAutoUpdateCheckAt)}</dd></div>
+                      </dl>
                     </section>
 
                     <section className="instance-detail-section">
-                      <h3>Advanced Details</h3>
                       <dl className="instance-detail-list">
                         <div><dt>Path</dt><dd>{workspaceData.instance.instancePath}</dd></div>
                         <div><dt>Installed version</dt><dd>{workspaceData.bds.version ?? "Not installed"}</dd></div>
                         <div><dt>Runtime</dt><dd>{workspaceData.runtime.status}</dd></div>
                         <div><dt>PID</dt><dd>{workspaceData.runtime.pid ?? "Not running"}</dd></div>
-                      </dl>
-                    </section>
-
-                    <section className="instance-detail-section">
-                      <h3>Gameplay</h3>
-                      <dl className="instance-detail-list">
-                        <div><dt>Server name</dt><dd>{workspaceData.settings.serverName}</dd></div>
-                        <div><dt>Gamemode</dt><dd>{workspaceData.settings.gamemode}</dd></div>
-                        <div><dt>Difficulty</dt><dd>{workspaceData.settings.difficulty}</dd></div>
-                        <div><dt>Allow cheats</dt><dd>{workspaceData.settings.allowCheats ? "Enabled" : "Disabled"}</dd></div>
-                        <div><dt>Texture pack required</dt><dd>{workspaceData.settings.texturepackRequired ? "Yes" : "No"}</dd></div>
-                      </dl>
-                    </section>
-
-                    <section className="instance-detail-section">
-                      <h3>Players and network</h3>
-                      <dl className="instance-detail-list">
-                        <div><dt>Max players</dt><dd>{workspaceData.settings.maxPlayers}</dd></div>
-                        <div><dt>Default permission</dt><dd>{workspaceData.settings.defaultPlayerPermissionLevel}</dd></div>
-                        <div><dt>Idle timeout</dt><dd>{workspaceData.settings.playerIdleTimeout} min</dd></div>
-                        <div><dt>Online mode</dt><dd>{workspaceData.settings.onlineMode ? "Enabled" : "Disabled"}</dd></div>
-                        <div><dt>IPv4 port</dt><dd>{workspaceData.settings.serverPort}</dd></div>
-                        <div><dt>IPv6 port</dt><dd>{workspaceData.settings.serverPortV6}</dd></div>
-                      </dl>
-                    </section>
-
-                    <section className="instance-detail-section">
-                      <h3>World tuning</h3>
-                      <dl className="instance-detail-list">
-                        <div><dt>View distance</dt><dd>{workspaceData.settings.viewDistance}</dd></div>
-                        <div><dt>Tick distance</dt><dd>{workspaceData.settings.tickDistance}</dd></div>
-                        <div><dt>Settings updated</dt><dd>{formatTimestamp(workspaceData.settings.updatedAt)}</dd></div>
                       </dl>
                     </section>
                   </div>
@@ -1023,12 +1080,6 @@ const InstancesPage = () => {
                 {activeTab === "properties" ? (
                   <div className="instance-details-sections instance-details-sections-single">
                     <section className="instance-detail-section">
-                      <div className="instance-section-header">
-                        <h3>server.properties</h3>
-                        <button type="button" className="secondary-button" onClick={() => void openServerPropertiesEditor()}>
-                          Edit
-                        </button>
-                      </div>
                       {serverPropertiesLoading && !serverPropertiesData ? <p className="muted-copy">Loading server.properties...</p> : null}
                       {serverPropertiesData ? (
                         <dl className="instance-detail-list instance-detail-list-properties">
@@ -1052,7 +1103,7 @@ const InstancesPage = () => {
                     </section>
                   </div>
                 ) : null}
-              </>
+              </div>
             ) : null}
 
             {serverPropertiesEditorOpen ? (
@@ -1101,6 +1152,125 @@ const InstancesPage = () => {
                       </div>
                     </form>
                   ) : null}
+                </aside>
+              </div>
+            ) : null}
+
+            {editingInstance && workspaceData ? (
+              <div className="instance-editor-drawer-layer">
+                <button
+                  type="button"
+                  className="instance-editor-drawer-backdrop"
+                  aria-label="Close instance editor"
+                  onClick={closeInstanceEditor}
+                />
+                <aside className="instance-editor-drawer">
+                  <div className="instance-editor-drawer-header">
+                    <div>
+                      <p className="eyebrow">Instance Editor</p>
+                      <h3>Overview</h3>
+                    </div>
+                  </div>
+
+                  <form className="form-grid instances-create-form" onSubmit={handleSaveInstance}>
+                    <label>
+                      Instance name
+                      <input
+                        value={instanceEditor.friendlyName}
+                        onChange={(event) => setInstanceEditor((current) => ({ ...current, friendlyName: event.target.value }))}
+                      />
+                    </label>
+
+                    <div className="instances-toggle-row">
+                      <div className="instances-toggle-copy">
+                        <strong>Enable automatic updating</strong>
+                        <span>
+                          {instanceEditor.automaticUpdatesEnabled ? "Automatic updating enabled" : "Automatic updating disabled"}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        className={instanceEditor.automaticUpdatesEnabled ? "toggle-switch active" : "toggle-switch"}
+                        aria-pressed={instanceEditor.automaticUpdatesEnabled}
+                        onClick={() =>
+                          setInstanceEditor((current) => ({
+                            ...current,
+                            automaticUpdatesEnabled: !current.automaticUpdatesEnabled,
+                          }))
+                        }
+                      >
+                        <span className="toggle-switch-thumb" />
+                      </button>
+                    </div>
+
+                    {instanceEditor.automaticUpdatesEnabled ? (
+                      <div className="instances-schedule-grid">
+                        <label>
+                          Check for updates
+                          <select
+                            value={instanceEditor.updateCheckFrequency}
+                            onChange={(event) =>
+                              setInstanceEditor((current) => ({
+                                ...current,
+                                updateCheckFrequency: event.target.value === "weekly" ? "weekly" : "daily",
+                              }))
+                            }
+                          >
+                            <option value="daily">Daily</option>
+                            <option value="weekly">Weekly</option>
+                          </select>
+                        </label>
+
+                        <label>
+                          Check time
+                          <input
+                            type="time"
+                            value={instanceEditor.updateCheckTime}
+                            onChange={(event) =>
+                              setInstanceEditor((current) => ({ ...current, updateCheckTime: event.target.value }))
+                            }
+                          />
+                        </label>
+
+                        {instanceEditor.updateCheckFrequency === "weekly" ? (
+                          <label>
+                            Check day
+                            <select
+                              value={instanceEditor.updateCheckWeekday}
+                              onChange={(event) =>
+                                setInstanceEditor((current) => ({
+                                  ...current,
+                                  updateCheckWeekday: event.target.value as InstanceEditorState["updateCheckWeekday"],
+                                }))
+                              }
+                          >
+                            <option value="monday">Monday</option>
+                            <option value="tuesday">Tuesday</option>
+                            <option value="wednesday">Wednesday</option>
+                            <option value="thursday">Thursday</option>
+                            <option value="friday">Friday</option>
+                            <option value="saturday">Saturday</option>
+                            <option value="sunday">Sunday</option>
+                          </select>
+                        </label>
+                        ) : null}
+                      </div>
+                    ) : null}
+
+                    <div className="instances-form-actions">
+                      <button type="submit" className="primary-button" disabled={savingInstance}>
+                        {savingInstance ? "Saving..." : "Save"}
+                      </button>
+                      <button
+                        type="button"
+                        className="secondary-button"
+                        onClick={closeInstanceEditor}
+                        disabled={savingInstance}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </form>
                 </aside>
               </div>
             ) : null}

@@ -2,7 +2,7 @@ import type { Database } from "better-sqlite3";
 import type { FastifyBaseLogger } from "fastify";
 import type { Instance, InstanceUpdateCheckWeekday } from "../../shared/types/index.js";
 import { discoverBdsDownloadUrl } from "../bds/bdsDiscoveryService.js";
-import { installBdsForInstance } from "../bds/bdsInstallService.js";
+import { getBdsStatusForInstance, installBdsForInstance } from "../bds/bdsInstallService.js";
 import { getBdsRuntimeState, sendBdsCommand, startBdsForInstance, stopBdsForInstance } from "../bds/bdsRuntimeService.js";
 import { getAppSettings } from "../setup/setupService.js";
 import { listInstances } from "./instanceService.js";
@@ -105,20 +105,30 @@ function isInstanceDueForAutoUpdate(instance: Instance, timeZone: string, now: D
   return nowDayStamp > lastDayStamp;
 }
 
-async function performAutoUpdateForInstance(db: Database, logger: FastifyBaseLogger, instance: Instance, checkedAt: string): Promise<void> {
+async function applyBdsUpdateForInstance(
+  db: Database,
+  logger: FastifyBaseLogger,
+  instance: Instance,
+  checkedAt: string,
+  options?: { updateLastCheckAt?: boolean },
+): Promise<import("../../shared/types/index.js").BdsInstall> {
+  const shouldUpdateLastCheckAt = options?.updateLastCheckAt ?? true;
+
   if (activeUpdates.has(instance.id)) {
-    return;
+    return await getBdsStatusForInstance(db, instance.id);
   }
 
   activeUpdates.add(instance.id);
 
   try {
     const discovery = await discoverBdsDownloadUrl();
-    updateInstanceAutoUpdateCheckAt(db, instance.id, checkedAt);
+    if (shouldUpdateLastCheckAt) {
+      updateInstanceAutoUpdateCheckAt(db, instance.id, checkedAt);
+    }
 
     if (!discovery.version || discovery.version === instance.bdsVersion) {
-      logger.info({ instanceId: instance.id, version: discovery.version }, "No BDS auto-update needed");
-      return;
+      logger.info({ instanceId: instance.id, version: discovery.version }, "No BDS update needed");
+      return await getBdsStatusForInstance(db, instance.id);
     }
 
     const runtimeBeforeUpdate = await getBdsRuntimeState(db, instance.id);
@@ -145,12 +155,34 @@ async function performAutoUpdateForInstance(db: Database, logger: FastifyBaseLog
       await startBdsForInstance(db, instance.id);
     }
 
-    logger.info({ instanceId: instance.id, version: install.version }, "Completed BDS auto-update");
+    logger.info({ instanceId: instance.id, version: install.version }, "Completed BDS update");
+    return install;
   } catch (error) {
-    logger.error({ instanceId: instance.id, error }, "BDS auto-update failed");
+    logger.error({ instanceId: instance.id, error }, "BDS update failed");
+    throw error;
   } finally {
     activeUpdates.delete(instance.id);
   }
+}
+
+async function performAutoUpdateForInstance(db: Database, logger: FastifyBaseLogger, instance: Instance, checkedAt: string): Promise<void> {
+  await applyBdsUpdateForInstance(db, logger, instance, checkedAt);
+}
+
+export async function runManualUpdateForInstance(
+  db: Database,
+  logger: FastifyBaseLogger,
+  instanceId: string,
+): Promise<import("../../shared/types/index.js").BdsInstall> {
+  const instance = getInstance(db, instanceId);
+
+  if (!instance) {
+    throw new Error("Instance not found");
+  }
+
+  return await applyBdsUpdateForInstance(db, logger, instance, new Date().toISOString(), {
+    updateLastCheckAt: false,
+  });
 }
 
 async function runAutoUpdateCycle(db: Database, logger: FastifyBaseLogger): Promise<void> {

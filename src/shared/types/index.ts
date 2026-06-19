@@ -24,6 +24,7 @@ export type {
   InstanceSettingsResponse,
   InstanceServerPropertiesResponse,
   InstanceBdsStatusResponse,
+  InstanceBdsManualUpdateResponse,
   InstanceBdsRuntimeResponse,
   LatestBdsVersionResponse,
   InstanceBackupResponse,
