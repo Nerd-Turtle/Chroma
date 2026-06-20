@@ -10,6 +10,7 @@ import {
 } from "./instanceRepository.js";
 import { createDefaultSettingsForInstance } from "./instanceSettingsService.js";
 import { installBdsForInstance } from "../bds/bdsInstallService.js";
+import { appendInstanceRuntimeEvent } from "./instanceRuntimeEventService.js";
 
 export type CreateInstanceInput = {
   friendlyName: string;
@@ -40,11 +41,11 @@ export function updateInstance(
   db: Database,
   instanceId: string,
   input: UpdateInstanceInput,
-): Instance | undefined {
+): Promise<Instance | undefined> {
   const instance = getInstanceFromDb(db, instanceId);
 
   if (!instance) {
-    return undefined;
+    return Promise.resolve(undefined);
   }
 
   instance.friendlyName = input.friendlyName;
@@ -55,7 +56,19 @@ export function updateInstance(
   instance.updatedAt = new Date().toISOString();
 
   saveInstanceToDb(db, instance);
-  return instance;
+  return appendInstanceRuntimeEvent(db, instanceId, {
+    category: "settings",
+    action: "instance_overview_updated",
+    level: "info",
+    message: "Updated instance overview settings.",
+    details: {
+      friendlyName: instance.friendlyName,
+      automaticUpdatesEnabled: instance.automaticUpdatesEnabled,
+      updateCheckFrequency: instance.updateCheckFrequency,
+      updateCheckTime: instance.updateCheckTime,
+      updateCheckWeekday: instance.updateCheckWeekday,
+    },
+  }).then(() => instance);
 }
 
 export async function createInstance(
@@ -111,6 +124,18 @@ export async function createInstance(
     // eslint-disable-next-line no-console
     console.error("Failed to auto-install BDS for instance", { instanceId: id, error });
   }
+
+  await appendInstanceRuntimeEvent(db, id, {
+    category: "settings",
+    action: "instance_created",
+    level: "info",
+    message: "Created a new instance.",
+    details: {
+      friendlyName: instance.friendlyName,
+      installedVersion: instance.bdsVersion,
+      automaticUpdatesEnabled: instance.automaticUpdatesEnabled,
+    },
+  });
 
   return instance;
 }

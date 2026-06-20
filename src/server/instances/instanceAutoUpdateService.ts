@@ -3,11 +3,12 @@ import type { FastifyBaseLogger } from "fastify";
 import type { Instance, InstanceUpdateCheckWeekday } from "../../shared/types/index.js";
 import { discoverBdsDownloadUrl } from "../bds/bdsDiscoveryService.js";
 import { getBdsStatusForInstance, installBdsForInstance } from "../bds/bdsInstallService.js";
-import { getBdsRuntimeState, sendBdsCommand, startBdsForInstance, stopBdsForInstance } from "../bds/bdsRuntimeService.js";
+import { getBdsRuntimeState, sendBdsCommand, setBdsMaintenanceState, startBdsForInstance, stopBdsForInstance } from "../bds/bdsRuntimeService.js";
 import { getAppSettings } from "../setup/setupService.js";
 import { listInstances } from "./instanceService.js";
 import { getInstance, saveInstance, updateInstanceAutoUpdateCheckAt } from "./instanceRepository.js";
 import { createInternalRevertBackup, restoreConfigFilesFromInternalBackup } from "./instanceBackupService.js";
+import { appendInstanceRuntimeEvent } from "./instanceRuntimeEventService.js";
 
 const AUTO_UPDATE_INTERVAL_MS = 60_000;
 const MAINTENANCE_WARNING_DELAY_MS = 10_000;
@@ -126,22 +127,73 @@ async function applyBdsUpdateForInstance(
       updateInstanceAutoUpdateCheckAt(db, instance.id, checkedAt);
     }
 
+    await appendInstanceRuntimeEvent(db, instance.id, {
+      category: "update",
+      action: "update_check_completed",
+      level: "info",
+      message: discovery.version
+        ? `Checked for BDS updates. Latest available version is ${discovery.version}.`
+        : "Checked for BDS updates, but the latest version could not be determined.",
+      details: {
+        latestVersion: discovery.version ?? null,
+        currentVersion: instance.bdsVersion,
+        source: shouldUpdateLastCheckAt ? "automatic" : "manual",
+      },
+      createdAt: checkedAt,
+    });
+
     if (!discovery.version || discovery.version === instance.bdsVersion) {
       logger.info({ instanceId: instance.id, version: discovery.version }, "No BDS update needed");
+      await appendInstanceRuntimeEvent(db, instance.id, {
+        category: "update",
+        action: "update_not_needed",
+        level: "info",
+        message: discovery.version
+          ? `No update needed. Instance is already on ${discovery.version}.`
+          : "No update was installed because no latest version was available.",
+        details: {
+          latestVersion: discovery.version ?? null,
+          currentVersion: instance.bdsVersion,
+          source: shouldUpdateLastCheckAt ? "automatic" : "manual",
+        },
+        createdAt: checkedAt,
+      });
       return await getBdsStatusForInstance(db, instance.id);
     }
 
+    await appendInstanceRuntimeEvent(db, instance.id, {
+      category: "update",
+      action: "update_started",
+      level: "warning",
+      message: `Starting BDS update from ${instance.bdsVersion} to ${discovery.version}.`,
+      details: {
+        currentVersion: instance.bdsVersion,
+        targetVersion: discovery.version,
+        source: shouldUpdateLastCheckAt ? "automatic" : "manual",
+      },
+      createdAt: checkedAt,
+    });
+
     const runtimeBeforeUpdate = await getBdsRuntimeState(db, instance.id);
-    const wasRunning = runtimeBeforeUpdate.status === "running";
+    const wasRunning = runtimeBeforeUpdate.isProcessActive;
 
     if (wasRunning) {
+      await setBdsMaintenanceState(
+        db,
+        instance.id,
+        "update",
+        `Preparing BDS update to ${discovery.version}. The instance will shut down for maintenance.`,
+      );
       sendBdsCommand(instance.id, "say Server maintenance starting for a Bedrock update. The server will shut down shortly.");
       await sleep(MAINTENANCE_WARNING_DELAY_MS);
       await stopBdsForInstance(db, instance.id);
     }
 
+    await setBdsMaintenanceState(db, instance.id, "backup", "Creating an internal revert backup before updating BDS.");
     const revertBackup = await createInternalRevertBackup(db, instance.id);
+    await setBdsMaintenanceState(db, instance.id, "update", `Installing BDS ${discovery.version}.`);
     const install = await installBdsForInstance(db, instance.id);
+    await setBdsMaintenanceState(db, instance.id, "restore", "Restoring instance configuration after the BDS update.");
     await restoreConfigFilesFromInternalBackup(db, instance.id, revertBackup.backupId);
 
     const refreshedInstance = getInstance(db, instance.id);
@@ -152,15 +204,46 @@ async function applyBdsUpdateForInstance(
     }
 
     if (wasRunning) {
+      await setBdsMaintenanceState(db, instance.id, "update", "Restarting the instance after the BDS update.");
       await startBdsForInstance(db, instance.id);
+    } else {
+      await setBdsMaintenanceState(db, instance.id, "idle", "BDS update completed.");
     }
 
     logger.info({ instanceId: instance.id, version: install.version }, "Completed BDS update");
+    await appendInstanceRuntimeEvent(db, instance.id, {
+      category: "update",
+      action: "update_completed",
+      level: "info",
+      message: `Completed BDS update to ${install.version ?? discovery.version}.`,
+      details: {
+        previousVersion: instance.bdsVersion,
+        installedVersion: install.version ?? discovery.version ?? null,
+        source: shouldUpdateLastCheckAt ? "automatic" : "manual",
+        serverRestarted: wasRunning,
+      },
+    });
     return install;
   } catch (error) {
     logger.error({ instanceId: instance.id, error }, "BDS update failed");
+    const message = error instanceof Error ? error.message : String(error);
+    await setBdsMaintenanceState(db, instance.id, "idle", `BDS update failed: ${message}`);
+    await appendInstanceRuntimeEvent(db, instance.id, {
+      category: "update",
+      action: "update_failed",
+      level: "error",
+      message: `BDS update failed: ${message}`,
+      details: {
+        currentVersion: instance.bdsVersion,
+        source: shouldUpdateLastCheckAt ? "automatic" : "manual",
+      },
+    });
     throw error;
   } finally {
+    const latestRuntimeState = await getBdsRuntimeState(db, instance.id);
+    if (!latestRuntimeState.isProcessActive && latestRuntimeState.maintenanceStatus !== "idle") {
+      await setBdsMaintenanceState(db, instance.id, "idle");
+    }
     activeUpdates.delete(instance.id);
   }
 }

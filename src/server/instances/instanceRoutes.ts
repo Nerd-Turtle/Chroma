@@ -9,9 +9,10 @@ import {
   listInstances,
   updateInstance,
 } from "./instanceService.js";
+import { listRecentInstanceRuntimeEvents } from "./instanceRuntimeEventService.js";
 import { registerBdsRoutes } from "../bds/bdsRoutes.js";
 import { registerInstanceSettingsRoutes } from "./instanceSettingsRoutes.js";
-import { createExportBackupZip, getExportBackupRecord } from "./instanceBackupService.js";
+import { createManagedExportBackupZip, getExportBackupRecord } from "./instanceBackupService.js";
 
 export async function registerInstanceRoutes(app: FastifyInstance, db: Database) {
   void app.register(async (protectedApp) => {
@@ -103,6 +104,19 @@ export async function registerInstanceRoutes(app: FastifyInstance, db: Database)
       };
     });
 
+    protectedApp.get("/api/instances/:instanceId/events", async (request, reply) => {
+      const params = request.params as { instanceId: string };
+      const instance = getInstance(db, params.instanceId);
+
+      if (!instance) {
+        return reply.code(404).send({ error: "Instance not found" });
+      }
+
+      return {
+        events: listRecentInstanceRuntimeEvents(db, params.instanceId),
+      };
+    });
+
     protectedApp.put("/api/instances/:instanceId", async (request, reply) => {
       const params = request.params as { instanceId: string };
       const body = request.body as Partial<UpdateInstanceRequest>;
@@ -127,7 +141,7 @@ export async function registerInstanceRoutes(app: FastifyInstance, db: Database)
         return reply.code(400).send({ error: "updateCheckTime must be in HH:MM format" });
       }
 
-      const instance = updateInstance(db, params.instanceId, {
+      const instance = await updateInstance(db, params.instanceId, {
         friendlyName: body.friendlyName.trim(),
         automaticUpdatesEnabled: body.automaticUpdatesEnabled,
         updateCheckFrequency: body.updateCheckFrequency,
@@ -146,7 +160,7 @@ export async function registerInstanceRoutes(app: FastifyInstance, db: Database)
       const params = request.params as { instanceId: string };
 
       try {
-        const backup = await createExportBackupZip(db, params.instanceId);
+        const backup = await createManagedExportBackupZip(db, params.instanceId);
         return reply.code(201).send({
           backupId: backup.backupId,
           fileName: backup.fileName,

@@ -1,12 +1,20 @@
 import type {
   AuthSessionResponse,
+  BdsStartValidationResult,
   CreateInstanceRequest,
   DashboardSummary,
+  InstanceBdsConsoleCommandRequest,
+  InstanceBdsConsoleCommandResponse,
+  InstanceBdsLogListResponse,
+  InstanceBdsLogPageResponse,
+  InstanceBdsLogTailResponse,
   InstanceBdsManualUpdateResponse,
+  InstanceBdsStartBlockedResponse,
   InstanceBdsRuntimeResponse,
   InstanceBackupResponse,
   InstanceBdsStatusResponse,
   InstanceDetailResponse,
+  InstanceRuntimeEventsResponse,
   InstanceServerPropertiesResponse,
   InstanceListResponse,
   InstanceSettingsResponse,
@@ -19,10 +27,31 @@ import type {
   UpdateInstanceServerPropertiesRequest,
 } from "../../../shared/types/index.js";
 
+export class ApiRequestError extends Error {
+  readonly status: number;
+  readonly validation: BdsStartValidationResult | undefined;
+
+  constructor(message: string, status: number, options?: { validation: BdsStartValidationResult | undefined }) {
+    super(message);
+    this.name = "ApiRequestError";
+    this.status = status;
+    this.validation = options?.validation;
+  }
+}
+
 async function readJson<T>(response: Response): Promise<T> {
-  const body = (await response.json()) as T & { error?: string };
+  const body = (await response.json()) as T & Partial<InstanceBdsStartBlockedResponse> & { error?: string };
   if (!response.ok) {
-    throw new Error(typeof body.error === "string" ? body.error : "Request failed");
+    const validationMessage =
+      body.validation && Array.isArray(body.validation.errors) && body.validation.errors.length > 0
+        ? body.validation.errors.map((issue) => issue.message).join(" ")
+        : undefined;
+
+    throw new ApiRequestError(
+      validationMessage ?? (typeof body.error === "string" ? body.error : "Request failed"),
+      response.status,
+      { validation: body.validation },
+    );
   }
 
   return body;
@@ -80,6 +109,11 @@ export async function getInstance(instanceId: string): Promise<InstanceDetailRes
   return readJson<InstanceDetailResponse>(response);
 }
 
+export async function getInstanceRuntimeEvents(instanceId: string): Promise<InstanceRuntimeEventsResponse> {
+  const response = await fetch(`/api/instances/${instanceId}/events`);
+  return readJson<InstanceRuntimeEventsResponse>(response);
+}
+
 export async function createInstance(payload: CreateInstanceRequest): Promise<InstanceDetailResponse> {
   const response = await fetch("/api/instances", {
     method: "POST",
@@ -133,6 +167,29 @@ export async function getInstanceBdsRuntime(instanceId: string): Promise<Instanc
   return readJson<InstanceBdsRuntimeResponse>(response);
 }
 
+export async function getInstanceBdsLogFiles(instanceId: string): Promise<InstanceBdsLogListResponse> {
+  const response = await fetch(`/api/instances/${instanceId}/bds/logs`);
+  return readJson<InstanceBdsLogListResponse>(response);
+}
+
+export async function getInstanceCurrentBdsLogTail(instanceId: string, limit = 200): Promise<InstanceBdsLogTailResponse> {
+  const response = await fetch(`/api/instances/${instanceId}/bds/logs/current/tail?limit=${limit}`);
+  return readJson<InstanceBdsLogTailResponse>(response);
+}
+
+export async function getInstanceBdsLogPage(
+  instanceId: string,
+  fileName: string,
+  options?: { offset?: number; limit?: number },
+): Promise<InstanceBdsLogPageResponse> {
+  const offset = options?.offset ?? 0;
+  const limit = options?.limit ?? 200;
+  const response = await fetch(
+    `/api/instances/${instanceId}/bds/logs/${encodeURIComponent(fileName)}?offset=${offset}&limit=${limit}`,
+  );
+  return readJson<InstanceBdsLogPageResponse>(response);
+}
+
 export async function startInstanceBds(instanceId: string): Promise<InstanceBdsRuntimeResponse> {
   const response = await fetch(`/api/instances/${instanceId}/bds/start`, {
     method: "POST",
@@ -159,6 +216,19 @@ export async function manualUpdateInstanceBds(instanceId: string): Promise<Insta
     method: "POST",
   });
   return readJson<InstanceBdsManualUpdateResponse>(response);
+}
+
+export async function sendInstanceConsoleCommand(
+  instanceId: string,
+  payload: InstanceBdsConsoleCommandRequest,
+): Promise<InstanceBdsConsoleCommandResponse> {
+  const response = await fetch(`/api/instances/${instanceId}/bds/console/commands`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  return readJson<InstanceBdsConsoleCommandResponse>(response);
 }
 
 export async function createExportBackup(instanceId: string): Promise<InstanceBackupResponse> {

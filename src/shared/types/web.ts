@@ -1,8 +1,23 @@
 import type { AppSettings, AuthUser } from "./auth.js";
+import type { BdsConsoleSnapshot } from "./bdsConsole.js";
 import type { BdsInstall } from "./bds.js";
 import type { BdsRuntimeState } from "./bdsRuntime.js";
 import type { Instance, InstanceUpdateCheckFrequency, InstanceUpdateCheckWeekday } from "./instance.js";
+import type { InstanceRuntimeEvent } from "./runtimeEvent.js";
 import type { BedrockServerSettings } from "./serverSettings.js";
+
+export type BdsStartValidationIssue = {
+  code: string;
+  level: "error" | "warning";
+  message: string;
+  field?: string;
+};
+
+export type BdsStartValidationResult = {
+  canStart: boolean;
+  errors: BdsStartValidationIssue[];
+  warnings: BdsStartValidationIssue[];
+};
 
 export type SetupStatusResponse = {
   setupRequired: boolean;
@@ -66,6 +81,10 @@ export type InstanceDetailResponse = {
   instance: Instance;
 };
 
+export type InstanceRuntimeEventsResponse = {
+  events: InstanceRuntimeEvent[];
+};
+
 export type InstanceSettingsResponse = {
   settings: BedrockServerSettings;
   restartRequired?: boolean;
@@ -91,6 +110,49 @@ export type InstanceBdsManualUpdateResponse = {
 
 export type InstanceBdsRuntimeResponse = {
   runtime: BdsRuntimeState;
+};
+
+export type InstanceBdsConsoleCommandRequest = {
+  command: string;
+};
+
+export type InstanceBdsConsoleCommandResponse = {
+  accepted: true;
+};
+
+export type InstanceBdsConsoleSnapshotResponse = {
+  console: BdsConsoleSnapshot;
+};
+
+export type InstanceBdsLogFileSummary = {
+  fileName: string;
+  current: boolean;
+  sizeBytes: number;
+  updatedAt: string;
+};
+
+export type InstanceBdsLogListResponse = {
+  files: InstanceBdsLogFileSummary[];
+};
+
+export type InstanceBdsLogTailResponse = {
+  fileName: string;
+  lines: string[];
+};
+
+export type InstanceBdsLogPageResponse = {
+  fileName: string;
+  lines: string[];
+  offset: number;
+  limit: number;
+  totalLines: number;
+  hasPrevious: boolean;
+  hasNext: boolean;
+};
+
+export type InstanceBdsStartBlockedResponse = {
+  error: string;
+  validation: BdsStartValidationResult;
 };
 
 export type LatestBdsVersionResponse = {

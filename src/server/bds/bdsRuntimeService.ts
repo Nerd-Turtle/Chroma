@@ -1,12 +1,52 @@
 import type { Database } from "better-sqlite3";
+import type { FastifyBaseLogger } from "fastify";
+import type { BdsConsoleSnapshot } from "../../shared/types/index.js";
 import type { BdsRuntimeState } from "../../shared/types/bdsRuntime.js";
 import type { Instance } from "../../shared/types/index.js";
-import { getInstance } from "../instances/instanceService.js";
+import { getInstance, listInstances } from "../instances/instanceService.js";
 import { getBdsInstall } from "./bdsRepository.js";
 import { updateInstanceStatus } from "../instances/instanceRepository.js";
 import { BdsProcessManager } from "./bdsProcessManager.js";
+import { assertInstanceCanStart } from "./bdsStartValidationService.js";
+import { appendInstanceRuntimeEvent } from "../instances/instanceRuntimeEventService.js";
+import type { BdsLogFileSummary, BdsLogPage, BdsLogTail } from "./bdsLogService.js";
+import { getInstanceBdsLogPage, getInstanceCurrentBdsLogTail, listBdsLogFiles } from "./bdsLogService.js";
 
 const processManager = new BdsProcessManager();
+
+export class BdsStartupVerificationError extends Error {
+  readonly runtime: BdsRuntimeState;
+
+  constructor(runtime: BdsRuntimeState) {
+    super(runtime.message ?? "BDS failed startup verification.");
+    this.name = "BdsStartupVerificationError";
+    this.runtime = runtime;
+  }
+}
+
+function mapRuntimeStateToInstanceStatus(runtimeState: BdsRuntimeState): Instance["status"] {
+  if (runtimeState.maintenanceStatus === "update") {
+    return "updating";
+  }
+
+  if (runtimeState.maintenanceStatus === "backup") {
+    return "backing_up";
+  }
+
+  if (runtimeState.maintenanceStatus === "restore") {
+    return "restoring";
+  }
+
+  if (runtimeState.status === "unknown") {
+    return "unknown";
+  }
+
+  if (runtimeState.healthStatus === "degraded") {
+    return "degraded";
+  }
+
+  return runtimeState.status as Instance["status"];
+}
 
 function ensureBdsInstalled(db: Database, instanceId: string): void {
   const install = getBdsInstall(db, instanceId);
@@ -23,7 +63,41 @@ export async function getBdsRuntimeState(db: Database, instanceId: string): Prom
     throw new Error("Instance not found");
   }
 
-  return processManager.getRuntimeState(instanceId);
+  const runtimeState = processManager.getRuntimeState(instanceId);
+
+  if (runtimeState.status !== "stopped") {
+    return runtimeState;
+  }
+
+  if (instance.status === "running" || instance.status === "starting" || instance.status === "stopping") {
+    return {
+      ...runtimeState,
+      status: "unknown",
+      desiredStatus: instance.status === "stopping" ? "stopped" : "running",
+      healthStatus: "unknown",
+      maintenanceStatus: "idle",
+      message: "No in-memory runtime state is available for an instance previously marked active.",
+    };
+  }
+
+  return runtimeState;
+}
+
+export async function setBdsMaintenanceState(
+  db: Database,
+  instanceId: string,
+  maintenanceStatus: BdsRuntimeState["maintenanceStatus"],
+  message?: string,
+): Promise<BdsRuntimeState> {
+  const instance = getInstance(db, instanceId);
+
+  if (!instance) {
+    throw new Error("Instance not found");
+  }
+
+  const runtimeState = processManager.setMaintenanceState(instanceId, maintenanceStatus, message);
+  await updateInstanceStatus(db, instanceId, mapRuntimeStateToInstanceStatus(runtimeState));
+  return runtimeState;
 }
 
 export async function startBdsForInstance(db: Database, instanceId: string): Promise<BdsRuntimeState> {
@@ -34,14 +108,76 @@ export async function startBdsForInstance(db: Database, instanceId: string): Pro
   }
 
   ensureBdsInstalled(db, instanceId);
+  await appendInstanceRuntimeEvent(db, instanceId, {
+    category: "runtime",
+    action: "start_requested",
+    level: "info",
+    message: "Start requested for the instance.",
+  });
+
+  try {
+    await assertInstanceCanStart(db, instance);
+  } catch (error) {
+    if (error instanceof Error) {
+      await appendInstanceRuntimeEvent(db, instanceId, {
+        category: "runtime",
+        action: "start_blocked",
+        level: "warning",
+        message: error.message,
+      });
+    }
+
+    throw error;
+  }
+
+  await updateInstanceStatus(db, instanceId, "starting");
 
   try {
     const runtimeState = await processManager.start(instance);
-    await updateInstanceStatus(db, instanceId, "running");
+    const nextInstanceStatus = mapRuntimeStateToInstanceStatus(runtimeState);
+    await updateInstanceStatus(db, instanceId, nextInstanceStatus);
+
+    if (runtimeState.status !== "running") {
+      await appendInstanceRuntimeEvent(db, instanceId, {
+        category: "runtime",
+        action: "start_failed",
+        level: "error",
+        message: runtimeState.message ?? "BDS failed startup verification.",
+        details: {
+          runtimeStatus: runtimeState.status,
+          healthStatus: runtimeState.healthStatus,
+          pid: runtimeState.pid ?? null,
+        },
+      });
+      throw new BdsStartupVerificationError(runtimeState);
+    }
+
+    await appendInstanceRuntimeEvent(db, instanceId, {
+      category: "runtime",
+      action: "start_verified",
+      level: runtimeState.healthStatus === "degraded" ? "warning" : "info",
+      message: runtimeState.message ?? "BDS startup verified.",
+      details: {
+        runtimeStatus: runtimeState.status,
+        healthStatus: runtimeState.healthStatus,
+        pid: runtimeState.pid ?? null,
+      },
+    });
+
     return runtimeState;
   } catch (error) {
+    if (error instanceof BdsStartupVerificationError) {
+      throw error;
+    }
+
     await updateInstanceStatus(db, instanceId, "error");
     const message = error instanceof Error ? error.message : String(error);
+    await appendInstanceRuntimeEvent(db, instanceId, {
+      category: "runtime",
+      action: "start_failed",
+      level: "error",
+      message: `Failed to start BDS: ${message}`,
+    });
     throw new Error(message);
   }
 }
@@ -53,13 +189,27 @@ export async function stopBdsForInstance(db: Database, instanceId: string): Prom
     throw new Error("Instance not found");
   }
 
-  const runtimeState = await processManager.stop(instanceId);
+  await appendInstanceRuntimeEvent(db, instanceId, {
+    category: "runtime",
+    action: "stop_requested",
+    level: "info",
+    message: "Stop requested for the instance.",
+  });
 
-  if (runtimeState.status === "stopped") {
-    await updateInstanceStatus(db, instanceId, "stopped");
-  } else if (runtimeState.status === "error") {
-    await updateInstanceStatus(db, instanceId, "error");
-  }
+  const runtimeState = await processManager.stop(instanceId);
+  await updateInstanceStatus(db, instanceId, mapRuntimeStateToInstanceStatus(runtimeState));
+
+  await appendInstanceRuntimeEvent(db, instanceId, {
+    category: "runtime",
+    action: runtimeState.status === "stopped" ? "stop_completed" : "stop_failed",
+    level: runtimeState.status === "stopped" ? "info" : "error",
+    message: runtimeState.message ?? (runtimeState.status === "stopped" ? "Instance stopped." : "Instance stop failed."),
+    details: {
+      runtimeStatus: runtimeState.status,
+      healthStatus: runtimeState.healthStatus,
+      pid: runtimeState.pid ?? null,
+    },
+  });
 
   return runtimeState;
 }
@@ -71,8 +221,28 @@ export async function restartBdsForInstance(db: Database, instanceId: string): P
     throw new Error("Instance not found");
   }
 
+  await appendInstanceRuntimeEvent(db, instanceId, {
+    category: "runtime",
+    action: "restart_requested",
+    level: "info",
+    message: "Restart requested for the instance.",
+  });
+
   await stopBdsForInstance(db, instanceId);
   const runtimeState = await startBdsForInstance(db, instanceId);
+
+  await appendInstanceRuntimeEvent(db, instanceId, {
+    category: "runtime",
+    action: "restart_completed",
+    level: runtimeState.healthStatus === "degraded" ? "warning" : "info",
+    message: "Restart completed for the instance.",
+    details: {
+      runtimeStatus: runtimeState.status,
+      healthStatus: runtimeState.healthStatus,
+      pid: runtimeState.pid ?? null,
+    },
+  });
+
   return runtimeState;
 }
 
@@ -80,6 +250,111 @@ export function sendBdsCommand(instanceId: string, command: string): boolean {
   return processManager.sendCommand(instanceId, command);
 }
 
+export async function getBdsConsoleSnapshot(db: Database, instanceId: string): Promise<BdsConsoleSnapshot> {
+  const instance = getInstance(db, instanceId);
+
+  if (!instance) {
+    throw new Error("Instance not found");
+  }
+
+  return processManager.getConsoleSnapshot(instanceId);
+}
+
+export function subscribeToBdsConsole(
+  instanceId: string,
+  listener: Parameters<BdsProcessManager["subscribeToConsole"]>[1],
+): () => void {
+  return processManager.subscribeToConsole(instanceId, listener);
+}
+
+export async function listBdsLogFilesForInstance(db: Database, instanceId: string): Promise<BdsLogFileSummary[]> {
+  return await listBdsLogFiles(db, instanceId);
+}
+
+export async function getBdsCurrentLogTailForInstance(db: Database, instanceId: string, limit: number): Promise<BdsLogTail> {
+  return await getInstanceCurrentBdsLogTail(db, instanceId, limit);
+}
+
+export async function getBdsLogPageForInstance(
+  db: Database,
+  instanceId: string,
+  fileName: string,
+  offset: number,
+  limit: number,
+): Promise<BdsLogPage> {
+  return await getInstanceBdsLogPage(db, instanceId, fileName, offset, limit);
+}
+
+export async function sendBdsConsoleCommand(
+  db: Database,
+  instanceId: string,
+  command: string,
+): Promise<{ accepted: true } | { accepted: false; error: string; runtime: BdsRuntimeState }> {
+  const instance = getInstance(db, instanceId);
+
+  if (!instance) {
+    throw new Error("Instance not found");
+  }
+
+  const runtime = await getBdsRuntimeState(db, instanceId);
+  if (!runtime.isProcessActive || runtime.status !== "running") {
+    return {
+      accepted: false,
+      error: "Console commands are only available while the instance is running.",
+      runtime,
+    };
+  }
+
+  if (!processManager.sendCommand(instanceId, command)) {
+    return {
+      accepted: false,
+      error:
+        runtime.healthStatus === "degraded"
+          ? "Live console control is unavailable until the instance is restarted under direct Chroma management."
+          : "The live console command channel is unavailable right now.",
+      runtime,
+    };
+  }
+
+  return { accepted: true };
+}
+
 export async function stopAllBdsProcesses(): Promise<void> {
   await processManager.stopAll();
+}
+
+export async function reconcileBdsRuntimeStates(db: Database, logger: FastifyBaseLogger): Promise<void> {
+  for (const instance of listInstances(db)) {
+    const runtimeState = await processManager.reconcile(instance);
+    const nextInstanceStatus = mapRuntimeStateToInstanceStatus(runtimeState);
+    updateInstanceStatus(db, instance.id, nextInstanceStatus);
+
+    if (runtimeState.isProcessActive || runtimeState.status === "unknown") {
+      await appendInstanceRuntimeEvent(db, instance.id, {
+        category: "runtime",
+        action: "reconciled",
+        level: runtimeState.healthStatus === "degraded" || runtimeState.healthStatus === "unhealthy" ? "warning" : "info",
+        message: runtimeState.message ?? "Reconciled runtime state during Chroma startup.",
+        details: {
+          runtimeStatus: runtimeState.status,
+          desiredStatus: runtimeState.desiredStatus,
+          healthStatus: runtimeState.healthStatus,
+          pid: runtimeState.pid ?? null,
+          isProcessActive: runtimeState.isProcessActive,
+        },
+      });
+    }
+
+    logger.info(
+      {
+        instanceId: instance.id,
+        runtimeStatus: runtimeState.status,
+        desiredStatus: runtimeState.desiredStatus,
+        healthStatus: runtimeState.healthStatus,
+        isProcessActive: runtimeState.isProcessActive,
+        pid: runtimeState.pid,
+      },
+      "Reconciled BDS runtime state for instance",
+    );
+  }
 }

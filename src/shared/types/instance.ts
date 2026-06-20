@@ -3,7 +3,12 @@ export type InstanceStatus =
   | "starting"
   | "running"
   | "stopping"
-  | "error";
+  | "error"
+  | "unknown"
+  | "degraded"
+  | "updating"
+  | "backing_up"
+  | "restoring";
 
 export type InstanceUpdateCheckFrequency = "daily" | "weekly";
 export type InstanceUpdateCheckWeekday =

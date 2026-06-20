@@ -1,23 +1,33 @@
-import { ArrowDownToLine, LoaderCircle, Play, RotateCw, Save, Square } from "lucide-react";
+import { ArrowDownToLine, LoaderCircle, Play, RotateCw, Save, Square, Terminal } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import type {
+  BdsStartValidationResult,
+  BdsConsoleLine,
   BdsInstall,
   BdsRuntimeState,
   BedrockServerSettings,
   Instance,
+  InstanceBdsLogFileSummary,
+  InstanceRuntimeEvent,
 } from "../../../shared/types/index.js";
 import {
+  ApiRequestError,
   createInstance,
   createExportBackup,
   getInstance,
+  getInstanceBdsLogFiles,
+  getInstanceBdsLogPage,
   getInstanceBdsRuntime,
   getInstanceBdsStatus,
+  getInstanceCurrentBdsLogTail,
   getInstances,
+  getInstanceRuntimeEvents,
   getInstanceServerProperties,
   getInstanceSettings,
   getLatestBdsVersion,
   manualUpdateInstanceBds,
   restartInstanceBds,
+  sendInstanceConsoleCommand,
   startInstanceBds,
   stopInstanceBds,
   updateInstance,
@@ -29,10 +39,11 @@ type InstanceWorkspaceData = {
   settings: BedrockServerSettings;
   bds: BdsInstall;
   runtime: BdsRuntimeState;
+  events: InstanceRuntimeEvent[];
 };
 
 type RightPaneMode = "details" | "create";
-type RightPaneTab = "overview" | "properties" | "addons";
+type RightPaneTab = "overview" | "properties" | "logs" | "addons";
 type InstanceEditorState = {
   friendlyName: string;
   automaticUpdatesEnabled: boolean;
@@ -47,12 +58,49 @@ type ServerPropertiesEditorState = {
   restartRequired: boolean;
 };
 
+type ConsoleSessionState = {
+  lines: BdsConsoleLine[];
+  runtime: BdsRuntimeState | null;
+  liveOutput: boolean;
+  canWrite: boolean;
+};
+
+type LogViewerState = {
+  files: InstanceBdsLogFileSummary[];
+  selectedFileName: string;
+  lines: string[];
+  offset: number;
+  limit: number;
+  totalLines: number;
+  hasPrevious: boolean;
+  hasNext: boolean;
+  tailView: boolean;
+};
+
 type BannerTone = "success" | "warning" | "alert";
 
 type BannerState = {
   message: string;
   tone: BannerTone;
 };
+
+type WorkspaceNoticeTone = "info" | "success" | "warning" | "alert";
+
+type WorkspaceNotice = {
+  id: string;
+  tone: WorkspaceNoticeTone;
+  title: string;
+  message: string;
+};
+
+function formatLabel(value: string): string {
+  return value
+    .replace(/[_-]+/g, " ")
+    .split(" ")
+    .filter((part) => part !== "")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
 
 function formatTimestamp(value?: string): string {
   if (!value) {
@@ -63,7 +111,35 @@ function formatTimestamp(value?: string): string {
 }
 
 function formatWeekday(value: string): string {
-  return value.charAt(0).toUpperCase() + value.slice(1);
+  return formatLabel(value);
+}
+
+function formatBytes(value: number): string {
+  if (value < 1024) {
+    return `${value} B`;
+  }
+
+  if (value < 1024 * 1024) {
+    return `${(value / 1024).toFixed(1)} KB`;
+  }
+
+  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function formatEventAction(value: string): string {
+  return formatLabel(value);
+}
+
+function getEventToneClass(level: InstanceRuntimeEvent["level"]): string {
+  if (level === "error") {
+    return "status-alert";
+  }
+
+  if (level === "warning") {
+    return "status-warning";
+  }
+
+  return "status-current";
 }
 
 function parseServerPropertiesPreview(content: string): Array<{ key: string; value: string }> {
@@ -123,7 +199,7 @@ function getBdsListStatus(instance: Instance, bds?: BdsInstall): string {
 }
 
 function getRuntimeListStatus(instance: Instance): string {
-  return instance.status.charAt(0).toUpperCase() + instance.status.slice(1);
+  return formatLabel(instance.status);
 }
 
 function getAutoUpdateListStatus(instance: Instance): string {
@@ -154,9 +230,150 @@ function getVersionListStatus(instance: Instance, bds?: BdsInstall, latestBdsVer
   return `Update available: ${latestBdsVersion}`;
 }
 
+function getRuntimeStatusSummary(runtime: BdsRuntimeState): string {
+  if (runtime.status === "unknown") {
+    return "Unknown";
+  }
+
+  if (runtime.status === "starting" && runtime.healthStatus === "pending") {
+    return "Start In Progress";
+  }
+
+  if (runtime.status === "running" && runtime.healthStatus === "unknown") {
+    return "Running (Unverified)";
+  }
+
+  if (runtime.healthStatus === "degraded") {
+    return `${formatLabel(runtime.status)} (Degraded)`;
+  }
+
+  return formatLabel(runtime.status);
+}
+
+function getWorkspaceNoticeToneClass(tone: WorkspaceNoticeTone): string {
+  if (tone === "success") {
+    return "workspace-notice-success";
+  }
+
+  if (tone === "warning") {
+    return "workspace-notice-warning";
+  }
+
+  if (tone === "alert") {
+    return "workspace-notice-alert";
+  }
+
+  return "workspace-notice-info";
+}
+
+function buildWorkspaceNotices(
+  workspaceData: InstanceWorkspaceData | null,
+  latestBdsVersion: string,
+  validation: BdsStartValidationResult | null,
+): WorkspaceNotice[] {
+  if (!workspaceData) {
+    return [];
+  }
+
+  const notices: WorkspaceNotice[] = [];
+  const { instance, runtime, bds } = workspaceData;
+
+  if (validation) {
+    for (const issue of validation.errors) {
+      notices.push({
+        id: `validation-error-${issue.code}-${issue.message}`,
+        tone: "alert",
+        title: "Start blocked",
+        message: issue.message,
+      });
+    }
+
+    for (const issue of validation.warnings) {
+      notices.push({
+        id: `validation-warning-${issue.code}-${issue.message}`,
+        tone: "warning",
+        title: "Start warning",
+        message: issue.message,
+      });
+    }
+  }
+
+  if (runtime.maintenanceStatus !== "idle") {
+    notices.push({
+      id: `maintenance-${runtime.maintenanceStatus}`,
+      tone: "warning",
+      title: `${formatLabel(runtime.maintenanceStatus)} in progress`,
+      message: runtime.message ?? "Chroma is currently performing a managed maintenance workflow for this instance.",
+    });
+  } else if (runtime.healthStatus === "degraded") {
+    notices.push({
+      id: "runtime-degraded",
+      tone: "warning",
+      title: "Runtime degraded",
+      message:
+        runtime.message ??
+        "The instance is running, but Chroma does not currently have a fully healthy runtime control channel for it.",
+    });
+  } else if (runtime.status === "unknown") {
+    notices.push({
+      id: "runtime-unknown",
+      tone: "alert",
+      title: "Runtime unknown",
+      message:
+        runtime.message ??
+        "Chroma cannot currently confirm this runtime state. Review recent activity and logs before taking further action.",
+    });
+  } else if (runtime.status === "error") {
+    notices.push({
+      id: "runtime-error",
+      tone: "alert",
+      title: "Runtime error",
+      message: runtime.message ?? "The instance encountered a runtime error. Review recent activity and logs for more detail.",
+    });
+  } else if (!runtime.isProcessActive && bds.status === "installed" && runtime.status === "stopped") {
+    notices.push({
+      id: "runtime-ready",
+      tone: "success",
+      title: "Ready to start",
+      message: "The instance is stopped, BDS is installed, and Chroma is ready to start it.",
+    });
+  }
+
+  if (bds.status === "error") {
+    notices.push({
+      id: "install-error",
+      tone: "alert",
+      title: "BDS install error",
+      message: bds.error ?? "BDS is not currently in a healthy installed state for this instance.",
+    });
+  }
+
+  if (latestBdsVersion && instance.bdsVersion !== latestBdsVersion) {
+    notices.push({
+      id: `update-available-${latestBdsVersion}`,
+      tone: "warning",
+      title: "Update available",
+      message: `This instance is on ${instance.bdsVersion}. The latest available BDS version is ${latestBdsVersion}.`,
+    });
+  }
+
+  if (runtime.message && notices.every((notice) => notice.message !== runtime.message)) {
+    notices.push({
+      id: "runtime-note",
+      tone: "info",
+      title: "Runtime note",
+      message: runtime.message,
+    });
+  }
+
+  return notices;
+}
+
 const InstancesPage = () => {
   const dragState = useRef<{ startX: number; startWidth: number } | null>(null);
   const updateMenuRef = useRef<HTMLDivElement | null>(null);
+  const consoleEventSourceRef = useRef<EventSource | null>(null);
+  const consoleOutputRef = useRef<HTMLDivElement | null>(null);
   const [instances, setInstances] = useState<Instance[]>([]);
   const [instanceBdsStatuses, setInstanceBdsStatuses] = useState<Record<string, BdsInstall>>({});
   const [selectedInstanceId, setSelectedInstanceId] = useState<string>("");
@@ -172,6 +389,30 @@ const InstancesPage = () => {
   const [serverPropertiesData, setServerPropertiesData] = useState<ServerPropertiesEditorState | null>(null);
   const [serverPropertiesError, setServerPropertiesError] = useState("");
   const [serverPropertiesNotice, setServerPropertiesNotice] = useState("");
+  const [consoleOpen, setConsoleOpen] = useState(false);
+  const [consoleConnecting, setConsoleConnecting] = useState(false);
+  const [consoleSession, setConsoleSession] = useState<ConsoleSessionState>({
+    lines: [],
+    runtime: null,
+    liveOutput: false,
+    canWrite: false,
+  });
+  const [consoleCommand, setConsoleCommand] = useState("");
+  const [consoleCommandSending, setConsoleCommandSending] = useState(false);
+  const [consoleError, setConsoleError] = useState("");
+  const [logsLoading, setLogsLoading] = useState(false);
+  const [logViewer, setLogViewer] = useState<LogViewerState>({
+    files: [],
+    selectedFileName: "",
+    lines: [],
+    offset: 0,
+    limit: 200,
+    totalLines: 0,
+    hasPrevious: false,
+    hasNext: false,
+    tailView: true,
+  });
+  const [logViewerError, setLogViewerError] = useState("");
   const [banner, setBanner] = useState<BannerState | null>(null);
   const [updateMenuOpen, setUpdateMenuOpen] = useState(false);
   const [actionInFlight, setActionInFlight] = useState<"start" | "stop" | "restart" | "backup" | "check-update" | "update" | "">("");
@@ -194,10 +435,31 @@ const InstancesPage = () => {
   });
   const [listPaneWidth, setListPaneWidth] = useState(getDefaultListPaneWidth);
   const [error, setError] = useState("");
+  const [startValidationFeedback, setStartValidationFeedback] = useState<BdsStartValidationResult | null>(null);
+
+  const canStartSelectedInstance =
+    workspaceData !== null &&
+    actionInFlight === "" &&
+    workspaceData.runtime.status !== "running" &&
+    workspaceData.runtime.status !== "starting" &&
+    workspaceData.runtime.status !== "unknown" &&
+    workspaceData.runtime.desiredStatus !== "running";
+  const canStopSelectedInstance =
+    workspaceData !== null &&
+    actionInFlight === "" &&
+    workspaceData.runtime.isProcessActive &&
+    workspaceData.runtime.status !== "stopping";
+  const canRestartSelectedInstance =
+    workspaceData !== null &&
+    actionInFlight === "" &&
+    workspaceData.runtime.isProcessActive &&
+    workspaceData.runtime.status !== "stopping";
+  const workspaceNotices = buildWorkspaceNotices(workspaceData, latestBdsVersion, startValidationFeedback);
 
   async function loadInstances(preferredInstanceId?: string) {
     setListLoading(true);
     setError("");
+    setStartValidationFeedback(null);
 
     try {
       const result = await getInstances();
@@ -255,11 +517,12 @@ const InstancesPage = () => {
       setError("");
 
       try {
-        const [instanceResult, settingsResult, bdsResult, runtimeResult] = await Promise.all([
+        const [instanceResult, settingsResult, bdsResult, runtimeResult, eventsResult] = await Promise.all([
           getInstance(selectedInstanceId),
           getInstanceSettings(selectedInstanceId),
           getInstanceBdsStatus(selectedInstanceId),
           getInstanceBdsRuntime(selectedInstanceId),
+          getInstanceRuntimeEvents(selectedInstanceId),
         ]);
 
         setWorkspaceData({
@@ -267,6 +530,7 @@ const InstancesPage = () => {
           settings: settingsResult.settings,
           bds: bdsResult.bds,
           runtime: runtimeResult.runtime,
+          events: eventsResult.events,
         });
         setInstanceEditor({
           friendlyName: instanceResult.instance.friendlyName,
@@ -294,8 +558,92 @@ const InstancesPage = () => {
       setServerPropertiesNotice("");
       setUpdateMenuOpen(false);
       setEditingInstance(false);
+      setConsoleOpen(false);
+      setLogViewer({
+        files: [],
+        selectedFileName: "",
+        lines: [],
+        offset: 0,
+        limit: 200,
+        totalLines: 0,
+        hasPrevious: false,
+        hasNext: false,
+        tailView: true,
+      });
+      setLogViewerError("");
     }
   }, [rightPaneMode, selectedInstanceId]);
+
+  useEffect(() => {
+    if (!consoleOpen || !selectedInstanceId) {
+      consoleEventSourceRef.current?.close();
+      consoleEventSourceRef.current = null;
+      setConsoleConnecting(false);
+      setConsoleError("");
+      setConsoleSession({
+        lines: [],
+        runtime: null,
+        liveOutput: false,
+        canWrite: false,
+      });
+      return;
+    }
+
+    setConsoleConnecting(true);
+    setConsoleError("");
+
+    const eventSource = new EventSource(`/api/instances/${selectedInstanceId}/bds/console/stream`);
+    consoleEventSourceRef.current = eventSource;
+
+    eventSource.onopen = () => {
+      setConsoleConnecting(false);
+      setConsoleError("");
+    };
+
+    eventSource.addEventListener("snapshot", (event) => {
+      const payload = JSON.parse((event as MessageEvent<string>).data) as ConsoleSessionState;
+      setConsoleSession(payload);
+      setConsoleConnecting(false);
+    });
+
+    eventSource.addEventListener("line", (event) => {
+      const payload = JSON.parse((event as MessageEvent<string>).data) as BdsConsoleLine;
+      setConsoleSession((current) => ({
+        ...current,
+        lines: [...current.lines, payload].slice(-300),
+      }));
+    });
+
+    eventSource.addEventListener("status", (event) => {
+      const payload = JSON.parse((event as MessageEvent<string>).data) as ConsoleSessionState;
+      setConsoleSession((current) => ({
+        ...current,
+        runtime: payload.runtime,
+        liveOutput: payload.liveOutput,
+        canWrite: payload.canWrite,
+      }));
+    });
+
+    eventSource.onerror = () => {
+      setConsoleConnecting(true);
+      setConsoleError("Console connection interrupted. Chroma is attempting to reconnect.");
+    };
+
+    return () => {
+      eventSource.close();
+      if (consoleEventSourceRef.current === eventSource) {
+        consoleEventSourceRef.current = null;
+      }
+    };
+  }, [consoleOpen, selectedInstanceId]);
+
+  useEffect(() => {
+    if (!consoleOpen || !consoleOutputRef.current) {
+      return;
+    }
+
+    consoleOutputRef.current.scrollTop = consoleOutputRef.current.scrollHeight;
+  }, [consoleOpen, consoleSession.lines]);
 
   useEffect(() => {
     function handlePointerDown(event: PointerEvent) {
@@ -328,12 +676,39 @@ const InstancesPage = () => {
   }, [rightPaneMode, selectedInstanceId]);
 
   useEffect(() => {
+    if (rightPaneMode !== "details" || activeTab !== "logs" || !selectedInstanceId) {
+      return;
+    }
+
+    void loadBdsLogs(selectedInstanceId, { mode: "tail" });
+  }, [activeTab, rightPaneMode, selectedInstanceId]);
+
+  useEffect(() => {
     if (rightPaneMode !== "details" || activeTab !== "properties" || !selectedInstanceId || serverPropertiesData || serverPropertiesLoading) {
       return;
     }
 
     void openServerPropertiesEditor(true);
   }, [activeTab, rightPaneMode, selectedInstanceId, serverPropertiesData, serverPropertiesLoading]);
+
+  useEffect(() => {
+    if (!selectedInstanceId) {
+      return;
+    }
+
+    if (actionInFlight !== "backup" && actionInFlight !== "update") {
+      return;
+    }
+
+    const timer = window.setInterval(() => {
+      void loadInstances(selectedInstanceId);
+      void refreshSelectedInstance(selectedInstanceId);
+    }, 1000);
+
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [actionInFlight, selectedInstanceId]);
 
   useEffect(() => {
     function handlePointerMove(event: PointerEvent) {
@@ -361,11 +736,12 @@ const InstancesPage = () => {
   }, []);
 
   async function refreshSelectedInstance(instanceId: string) {
-    const [instanceResult, settingsResult, bdsResult, runtimeResult] = await Promise.all([
+    const [instanceResult, settingsResult, bdsResult, runtimeResult, eventsResult] = await Promise.all([
       getInstance(instanceId),
       getInstanceSettings(instanceId),
       getInstanceBdsStatus(instanceId),
       getInstanceBdsRuntime(instanceId),
+      getInstanceRuntimeEvents(instanceId),
     ]);
 
     setWorkspaceData({
@@ -373,6 +749,7 @@ const InstancesPage = () => {
       settings: settingsResult.settings,
       bds: bdsResult.bds,
       runtime: runtimeResult.runtime,
+      events: eventsResult.events,
     });
     setInstanceEditor({
       friendlyName: instanceResult.instance.friendlyName,
@@ -381,6 +758,56 @@ const InstancesPage = () => {
       updateCheckTime: instanceResult.instance.updateCheckTime,
       updateCheckWeekday: instanceResult.instance.updateCheckWeekday,
     });
+  }
+
+  async function loadBdsLogs(
+    instanceId: string,
+    options?: { mode: "tail" } | { mode: "page"; fileName: string; offset?: number },
+  ) {
+    setLogsLoading(true);
+    setLogViewerError("");
+
+    try {
+      const filesResult = await getInstanceBdsLogFiles(instanceId);
+      const files = filesResult.files;
+      const currentFile = files.find((file) => file.current)?.fileName ?? "";
+      if (!options || options.mode === "tail") {
+        const tail = await getInstanceCurrentBdsLogTail(instanceId, 200);
+        setLogViewer({
+          files,
+          selectedFileName: tail.fileName || currentFile,
+          lines: tail.lines,
+          offset: 0,
+          limit: 200,
+          totalLines: tail.lines.length,
+          hasPrevious: false,
+          hasNext: false,
+          tailView: true,
+        });
+        return;
+      }
+
+      const page = await getInstanceBdsLogPage(instanceId, options.fileName, {
+        offset: options.offset ?? 0,
+        limit: 200,
+      });
+
+      setLogViewer({
+        files,
+        selectedFileName: page.fileName,
+        lines: page.lines,
+        offset: page.offset,
+        limit: page.limit,
+        totalLines: page.totalLines,
+        hasPrevious: page.hasPrevious,
+        hasNext: page.hasNext,
+        tailView: page.fileName === currentFile && page.offset + page.lines.length >= page.totalLines,
+      });
+    } catch (loadError) {
+      setLogViewerError(loadError instanceof Error ? loadError.message : "Unable to load BDS logs");
+    } finally {
+      setLogsLoading(false);
+    }
   }
 
   const handleCreateInstance = async (event: FormEvent<HTMLFormElement>) => {
@@ -451,6 +878,39 @@ const InstancesPage = () => {
     });
   };
 
+  const closeConsole = () => {
+    if (consoleCommandSending) {
+      return;
+    }
+
+    setConsoleOpen(false);
+    setConsoleCommand("");
+    setConsoleError("");
+  };
+
+  const handleSendConsoleCommand = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    if (!selectedInstanceId || consoleCommand.trim() === "") {
+      return;
+    }
+
+    setConsoleCommandSending(true);
+    setConsoleError("");
+
+    try {
+      await sendInstanceConsoleCommand(selectedInstanceId, {
+        command: consoleCommand.trim(),
+      });
+      setConsoleCommand("");
+      await refreshSelectedInstance(selectedInstanceId);
+    } catch (sendError) {
+      setConsoleError(sendError instanceof Error ? sendError.message : "Unable to send console command");
+    } finally {
+      setConsoleCommandSending(false);
+    }
+  };
+
   const handleRuntimeAction = async (action: "start" | "stop" | "restart") => {
     if (!selectedInstanceId) {
       return;
@@ -459,6 +919,9 @@ const InstancesPage = () => {
     setActionInFlight(action);
     setError("");
     setBanner(null);
+    if (action === "start") {
+      setStartValidationFeedback(null);
+    }
 
     try {
       if (action === "start") {
@@ -472,6 +935,9 @@ const InstancesPage = () => {
       await loadInstances(selectedInstanceId);
       await refreshSelectedInstance(selectedInstanceId);
     } catch (actionError) {
+      if (action === "start" && actionError instanceof ApiRequestError && actionError.validation) {
+        setStartValidationFeedback(actionError.validation);
+      }
       setError(actionError instanceof Error ? actionError.message : `Unable to ${action} instance`);
     } finally {
       setActionInFlight("");
@@ -702,6 +1168,7 @@ const InstancesPage = () => {
                     setSelectedInstanceId("");
                     setWorkspaceData(null);
                     setRightPaneMode("details");
+                    setStartValidationFeedback(null);
                   }
                 }}
               >
@@ -728,6 +1195,7 @@ const InstancesPage = () => {
                           setSelectedInstanceId(instance.id);
                           setRightPaneMode("details");
                           setError("");
+                          setStartValidationFeedback(null);
                         }}
                       >
                         <span className="instance-list-name">
@@ -816,6 +1284,15 @@ const InstancesPage = () => {
                   <button
                     type="button"
                     role="tab"
+                    aria-selected={activeTab === "logs"}
+                    className={activeTab === "logs" ? "instances-tab active" : "instances-tab"}
+                    onClick={() => setActiveTab("logs")}
+                  >
+                    Logs
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
                     aria-selected={activeTab === "addons"}
                     className={activeTab === "addons" ? "instances-tab active" : "instances-tab"}
                     onClick={() => setActiveTab("addons")}
@@ -830,7 +1307,7 @@ const InstancesPage = () => {
                     type="button"
                     className="icon-action icon-action-primary"
                     onClick={() => void handleRuntimeAction("start")}
-                    disabled={actionInFlight !== "" || workspaceData.runtime.status === "running" || workspaceData.runtime.status === "starting"}
+                    disabled={!canStartSelectedInstance}
                     title="Start"
                     aria-label="Start"
                   >
@@ -842,7 +1319,7 @@ const InstancesPage = () => {
                     type="button"
                     className="icon-action"
                     onClick={() => void handleRuntimeAction("stop")}
-                    disabled={actionInFlight !== "" || workspaceData.runtime.status === "stopped" || workspaceData.runtime.status === "stopping"}
+                    disabled={!canStopSelectedInstance}
                     title="Stop"
                     aria-label="Stop"
                   >
@@ -854,7 +1331,7 @@ const InstancesPage = () => {
                     type="button"
                     className="icon-action"
                     onClick={() => void handleRuntimeAction("restart")}
-                    disabled={actionInFlight !== "" || workspaceData.runtime.status === "stopped" || workspaceData.runtime.status === "stopping"}
+                    disabled={!canRestartSelectedInstance}
                     title="Restart"
                     aria-label="Restart"
                   >
@@ -912,6 +1389,18 @@ const InstancesPage = () => {
                       </div>
                     ) : null}
                   </div>
+                  <button
+                    type="button"
+                    className="icon-action"
+                    onClick={() => {
+                      setConsoleOpen(true);
+                      setConsoleError("");
+                    }}
+                    title="Console"
+                    aria-label="Console"
+                  >
+                    <Terminal aria-hidden="true" />
+                  </button>
                 </div>
               ) : null}
             </div>
@@ -1049,30 +1538,84 @@ const InstancesPage = () => {
                   </div>
                 </div>
 
-                {activeTab === "overview" ? (
-                  <div className="instance-details-sections">
-                    <section className="instance-detail-section">
-                      <dl className="instance-detail-list">
-                        <div><dt>Name</dt><dd>{workspaceData.instance.friendlyName}</dd></div>
-                        <div><dt>Automatic updates</dt><dd>{workspaceData.instance.automaticUpdatesEnabled ? "Enabled" : "Disabled"}</dd></div>
-                        <div><dt>Frequency</dt><dd>{workspaceData.instance.updateCheckFrequency}</dd></div>
-                        {workspaceData.instance.automaticUpdatesEnabled && workspaceData.instance.updateCheckFrequency === "weekly" ? (
-                          <div><dt>Check day</dt><dd>{formatWeekday(workspaceData.instance.updateCheckWeekday)}</dd></div>
-                        ) : null}
-                        {workspaceData.instance.automaticUpdatesEnabled ? (
-                          <div><dt>Check time</dt><dd>{workspaceData.instance.updateCheckTime}</dd></div>
-                        ) : null}
-                        <div><dt>Last check</dt><dd>{formatTimestamp(workspaceData.instance.lastAutoUpdateCheckAt)}</dd></div>
-                      </dl>
-                    </section>
+                {workspaceNotices.length > 0 ? (
+                  <section className="workspace-notice-stack" aria-label="Instance runtime summary">
+                    {workspaceNotices.map((notice) => (
+                      <article key={notice.id} className={`workspace-notice ${getWorkspaceNoticeToneClass(notice.tone)}`}>
+                        <div className="workspace-notice-copy">
+                          <strong>{notice.title}</strong>
+                          <p>{notice.message}</p>
+                        </div>
+                      </article>
+                    ))}
+                  </section>
+                ) : null}
 
-                    <section className="instance-detail-section">
-                      <dl className="instance-detail-list">
-                        <div><dt>Path</dt><dd>{workspaceData.instance.instancePath}</dd></div>
-                        <div><dt>Installed version</dt><dd>{workspaceData.bds.version ?? "Not installed"}</dd></div>
-                        <div><dt>Runtime</dt><dd>{workspaceData.runtime.status}</dd></div>
-                        <div><dt>PID</dt><dd>{workspaceData.runtime.pid ?? "Not running"}</dd></div>
-                      </dl>
+                {activeTab === "overview" ? (
+                  <div className="instance-overview-stack">
+                    <div className="instance-details-sections">
+                      <section className="instance-detail-section">
+                        <dl className="instance-detail-list">
+                          <div><dt>Name</dt><dd>{workspaceData.instance.friendlyName}</dd></div>
+                          <div><dt>Automatic updates</dt><dd>{workspaceData.instance.automaticUpdatesEnabled ? "Enabled" : "Disabled"}</dd></div>
+                          <div><dt>Frequency</dt><dd>{workspaceData.instance.updateCheckFrequency}</dd></div>
+                          {workspaceData.instance.automaticUpdatesEnabled && workspaceData.instance.updateCheckFrequency === "weekly" ? (
+                            <div><dt>Check day</dt><dd>{formatWeekday(workspaceData.instance.updateCheckWeekday)}</dd></div>
+                          ) : null}
+                          {workspaceData.instance.automaticUpdatesEnabled ? (
+                            <div><dt>Check time</dt><dd>{workspaceData.instance.updateCheckTime}</dd></div>
+                          ) : null}
+                          <div><dt>Last check</dt><dd>{formatTimestamp(workspaceData.instance.lastAutoUpdateCheckAt)}</dd></div>
+                        </dl>
+                      </section>
+
+                      <section className="instance-detail-section">
+                        <dl className="instance-detail-list">
+                          <div><dt>Path</dt><dd>{workspaceData.instance.instancePath}</dd></div>
+                          <div><dt>Installed version</dt><dd>{workspaceData.bds.version ?? "Not installed"}</dd></div>
+                          <div><dt>Desired state</dt><dd>{formatLabel(workspaceData.runtime.desiredStatus)}</dd></div>
+                          <div><dt>Process state</dt><dd>{getRuntimeStatusSummary(workspaceData.runtime)}</dd></div>
+                          <div><dt>Health</dt><dd>{formatLabel(workspaceData.runtime.healthStatus)}</dd></div>
+                          <div><dt>Maintenance</dt><dd>{formatLabel(workspaceData.runtime.maintenanceStatus)}</dd></div>
+                          <div><dt>Last observed</dt><dd>{formatTimestamp(workspaceData.runtime.observedAt)}</dd></div>
+                          <div><dt>PID</dt><dd>{workspaceData.runtime.pid ?? "Not running"}</dd></div>
+                          {workspaceData.runtime.message ? (
+                            <div><dt>Runtime note</dt><dd>{workspaceData.runtime.message}</dd></div>
+                          ) : null}
+                          {workspaceData.runtime.recentLogTail && workspaceData.runtime.recentLogTail.length > 0 ? (
+                            <div>
+                              <dt>Recent output</dt>
+                              <dd className="instance-detail-log-tail">{workspaceData.runtime.recentLogTail.join("\n")}</dd>
+                            </div>
+                          ) : null}
+                        </dl>
+                      </section>
+                    </div>
+
+                    <section className="instance-detail-section instance-detail-section-wide">
+                      <div className="instance-detail-section-header">
+                        <h3>Recent activity</h3>
+                      </div>
+                      {workspaceData.events.length === 0 ? (
+                        <p className="muted-copy">No instance activity has been recorded yet.</p>
+                      ) : (
+                        <div className="instance-event-list">
+                          {workspaceData.events.map((event) => (
+                            <article key={event.id} className="instance-event-row">
+                              <div className="instance-event-row-top">
+                                <span className={`instance-bds-status ${getEventToneClass(event.level)}`}>
+                                  {formatLabel(event.level)}
+                                </span>
+                                <span className="instance-event-action">{formatEventAction(event.action)}</span>
+                                <time className="instance-event-time" dateTime={event.createdAt}>
+                                  {formatTimestamp(event.createdAt)}
+                                </time>
+                              </div>
+                              <p className="instance-event-message">{event.message}</p>
+                            </article>
+                          ))}
+                        </div>
+                      )}
                     </section>
                   </div>
                 ) : null}
@@ -1080,6 +1623,11 @@ const InstancesPage = () => {
                 {activeTab === "properties" ? (
                   <div className="instance-details-sections instance-details-sections-single">
                     <section className="instance-detail-section">
+                      {serverPropertiesData?.restartRequired ? (
+                        <div className="instances-inline-note">
+                          Saving <code>server.properties</code> while the instance is running requires a restart before the changes take effect.
+                        </div>
+                      ) : null}
                       {serverPropertiesLoading && !serverPropertiesData ? <p className="muted-copy">Loading server.properties...</p> : null}
                       {serverPropertiesData ? (
                         <dl className="instance-detail-list instance-detail-list-properties">
@@ -1090,6 +1638,126 @@ const InstancesPage = () => {
                             </div>
                           ))}
                         </dl>
+                      ) : null}
+                    </section>
+                  </div>
+                ) : null}
+
+                {activeTab === "logs" ? (
+                  <div className="instance-details-sections instance-details-sections-single">
+                    <section className="instance-detail-section">
+                      <div className="instance-detail-section-header">
+                        <h3>Raw BDS logs</h3>
+                        <div className="instance-log-toolbar">
+                          <button
+                            type="button"
+                            className="secondary-button"
+                            onClick={() => void loadBdsLogs(selectedInstanceId, { mode: "tail" })}
+                            disabled={logsLoading}
+                          >
+                            Current tail
+                          </button>
+                          <button
+                            type="button"
+                            className="secondary-button"
+                            onClick={() =>
+                              logViewer.selectedFileName
+                                ? void loadBdsLogs(selectedInstanceId, {
+                                    mode: "page",
+                                    fileName: logViewer.selectedFileName,
+                                    offset: logViewer.offset,
+                                  })
+                                : undefined
+                            }
+                            disabled={logsLoading || !logViewer.selectedFileName}
+                          >
+                            Refresh
+                          </button>
+                        </div>
+                      </div>
+
+                      {logViewerError ? <div className="form-error">{logViewerError}</div> : null}
+                      {logsLoading ? <p className="muted-copy">Loading logs...</p> : null}
+
+                      {!logsLoading ? (
+                        <div className="instance-log-layout">
+                          <aside className="instance-log-file-list">
+                            {logViewer.files.length === 0 ? (
+                              <p className="muted-copy">No BDS log files exist yet.</p>
+                            ) : (
+                              logViewer.files.map((file) => (
+                                <button
+                                  key={file.fileName}
+                                  type="button"
+                                  className={logViewer.selectedFileName === file.fileName ? "instance-log-file active" : "instance-log-file"}
+                                  onClick={() =>
+                                    file.current
+                                      ? void loadBdsLogs(selectedInstanceId, { mode: "tail" })
+                                      : void loadBdsLogs(selectedInstanceId, { mode: "page", fileName: file.fileName, offset: 0 })
+                                  }
+                                >
+                                  <strong>{file.current ? "Current log" : file.fileName}</strong>
+                                  <small>{formatBytes(file.sizeBytes)} • {formatTimestamp(file.updatedAt)}</small>
+                                </button>
+                              ))
+                            )}
+                          </aside>
+
+                          <div className="instance-log-viewer-shell">
+                            <div className="instance-log-viewer-meta">
+                              <span className="instance-bds-status status-current">
+                                {logViewer.tailView ? "Tail view" : "Paged view"}
+                              </span>
+                              <span className="muted-copy">
+                                {logViewer.selectedFileName || "No file selected"}
+                              </span>
+                            </div>
+
+                            <div className="instance-log-viewer">
+                              {logViewer.lines.length === 0 ? (
+                                <p className="muted-copy">No log lines are available for this selection.</p>
+                              ) : (
+                                <pre className="instance-log-text">{logViewer.lines.join("\n")}</pre>
+                              )}
+                            </div>
+
+                            {!logViewer.tailView ? (
+                              <div className="instance-log-pagination">
+                                <button
+                                  type="button"
+                                  className="secondary-button"
+                                  onClick={() =>
+                                    void loadBdsLogs(selectedInstanceId, {
+                                      mode: "page",
+                                      fileName: logViewer.selectedFileName,
+                                      offset: Math.max(0, logViewer.offset - logViewer.limit),
+                                    })
+                                  }
+                                  disabled={logsLoading || !logViewer.hasPrevious}
+                                >
+                                  Previous
+                                </button>
+                                <span className="muted-copy">
+                                  Lines {logViewer.offset + 1}-{logViewer.offset + logViewer.lines.length} of {logViewer.totalLines}
+                                </span>
+                                <button
+                                  type="button"
+                                  className="secondary-button"
+                                  onClick={() =>
+                                    void loadBdsLogs(selectedInstanceId, {
+                                      mode: "page",
+                                      fileName: logViewer.selectedFileName,
+                                      offset: logViewer.offset + logViewer.limit,
+                                    })
+                                  }
+                                  disabled={logsLoading || !logViewer.hasNext}
+                                >
+                                  Next
+                                </button>
+                              </div>
+                            ) : null}
+                          </div>
+                        </div>
                       ) : null}
                     </section>
                   </div>
@@ -1152,6 +1820,80 @@ const InstancesPage = () => {
                       </div>
                     </form>
                   ) : null}
+                </aside>
+              </div>
+            ) : null}
+
+            {consoleOpen ? (
+              <div className="instance-editor-drawer-layer">
+                <button
+                  type="button"
+                  className="instance-editor-drawer-backdrop"
+                  aria-label="Close console"
+                  onClick={closeConsole}
+                />
+                <aside className="instance-editor-drawer instance-console-drawer">
+                  <div className="instance-editor-drawer-header">
+                    <div>
+                      <p className="eyebrow">BDS Console</p>
+                      <h3>{workspaceData?.instance.friendlyName ?? "Instance console"}</h3>
+                    </div>
+                  </div>
+
+                  <div className="instance-console-meta">
+                    <span className={`instance-bds-status ${consoleSession.canWrite ? "status-current" : "status-warning"}`}>
+                      {consoleSession.canWrite ? "Live command channel ready" : "Read-only"}
+                    </span>
+                    <span className={`instance-bds-status ${consoleSession.liveOutput ? "status-running" : "status-degraded"}`}>
+                      {consoleSession.liveOutput ? "Live output connected" : "No live output"}
+                    </span>
+                  </div>
+
+                  {consoleConnecting ? <p className="muted-copy">Connecting to the shared console stream...</p> : null}
+                  {consoleSession.runtime?.message ? <div className="instances-inline-note">{consoleSession.runtime.message}</div> : null}
+                  {consoleError ? <div className="form-error">{consoleError}</div> : null}
+
+                  <div ref={consoleOutputRef} className="instance-console-output" role="log" aria-live="polite" aria-relevant="additions text">
+                    {consoleSession.lines.length === 0 ? (
+                      <p className="muted-copy">No console output has been captured for this session yet.</p>
+                    ) : (
+                      consoleSession.lines.map((line) => (
+                        <div key={line.id} className={`instance-console-line source-${line.source}`}>
+                          <time className="instance-console-line-time" dateTime={line.createdAt}>
+                            {new Date(line.createdAt).toLocaleTimeString()}
+                          </time>
+                          <span className="instance-console-line-source">{line.source}</span>
+                          <span className="instance-console-line-text">{line.text}</span>
+                        </div>
+                      ))
+                    )}
+                  </div>
+
+                  <form className="instance-console-form" onSubmit={handleSendConsoleCommand}>
+                    <input
+                      value={consoleCommand}
+                      onChange={(event) => setConsoleCommand(event.target.value)}
+                      placeholder={
+                        consoleSession.canWrite
+                          ? "Enter a BDS command"
+                          : "Console commands are unavailable until the instance is running under live Chroma management"
+                      }
+                      disabled={!consoleSession.canWrite || consoleCommandSending}
+                      spellCheck={false}
+                    />
+                    <div className="instances-form-actions">
+                      <button
+                        type="submit"
+                        className="primary-button"
+                        disabled={!consoleSession.canWrite || consoleCommandSending || consoleCommand.trim() === ""}
+                      >
+                        {consoleCommandSending ? "Sending..." : "Send"}
+                      </button>
+                      <button type="button" className="secondary-button" onClick={closeConsole} disabled={consoleCommandSending}>
+                        Close
+                      </button>
+                    </div>
+                  </form>
                 </aside>
               </div>
             ) : null}

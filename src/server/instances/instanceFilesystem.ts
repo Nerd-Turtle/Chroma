@@ -11,6 +11,7 @@ export async function createInstanceDirectories(instance: Instance): Promise<voi
     `${instance.instancePath}/csm`,
     `${instance.instancePath}/csm/addons`,
     `${instance.instancePath}/csm/backups`,
+    `${instance.instancePath}/csm/events`,
     `${instance.instancePath}/csm/logs`,
     `${instance.instancePath}/csm/jobs`,
   ];

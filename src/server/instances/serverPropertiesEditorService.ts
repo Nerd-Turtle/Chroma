@@ -6,10 +6,15 @@ import { getBdsRuntimeState } from "../bds/bdsRuntimeService.js";
 import { getInstance } from "./instanceService.js";
 import { saveInstanceSettings } from "./instanceSettingsRepository.js";
 import { getSettings } from "./instanceSettingsService.js";
+import { appendInstanceRuntimeEvent } from "./instanceRuntimeEventService.js";
 import { serializeServerProperties } from "./serverProperties.js";
 
 function getServerPropertiesPath(instancePath: string): string {
   return join(instancePath, "bds", "server.properties");
+}
+
+function requiresRuntimeRestart(runtime: Awaited<ReturnType<typeof getBdsRuntimeState>>): boolean {
+  return runtime.isProcessActive || runtime.desiredStatus === "running";
 }
 
 async function readOrCreateServerPropertiesContent(
@@ -150,7 +155,7 @@ export async function getServerPropertiesEditorPayload(db: Database, instanceId:
   return {
     content,
     filePath,
-    restartRequired: runtime.status === "running" || runtime.status === "starting",
+    restartRequired: requiresRuntimeRestart(runtime),
   };
 }
 
@@ -177,10 +182,24 @@ export async function saveServerPropertiesFromEditor(
   saveInstanceSettings(db, nextSettings);
 
   const runtime = await getBdsRuntimeState(db, instanceId);
+  const restartRequired = requiresRuntimeRestart(runtime);
+
+  await appendInstanceRuntimeEvent(db, instanceId, {
+    category: "settings",
+    action: "server_properties_saved",
+    level: restartRequired ? "warning" : "info",
+    message: restartRequired
+      ? "Saved server.properties. A restart is required for changes to take effect."
+      : "Saved server.properties.",
+    details: {
+      filePath,
+      restartRequired,
+    },
+  });
 
   return {
     content: normalizedContent,
     filePath,
-    restartRequired: runtime.status === "running" || runtime.status === "starting",
+    restartRequired,
   };
 }

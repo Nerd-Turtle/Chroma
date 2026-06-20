@@ -71,6 +71,21 @@ export function runMigrations(db: Database): void {
       expires_at TEXT NOT NULL,
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
+
+    CREATE TABLE IF NOT EXISTS instance_runtime_events (
+      id TEXT PRIMARY KEY,
+      instance_id TEXT NOT NULL,
+      category TEXT NOT NULL,
+      action TEXT NOT NULL,
+      level TEXT NOT NULL,
+      message TEXT NOT NULL,
+      details_json TEXT,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (instance_id) REFERENCES instances(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_instance_runtime_events_instance_created
+      ON instance_runtime_events (instance_id, created_at DESC);
   `);
 
   const columns = db.prepare(`PRAGMA table_info(instances)`).all() as Array<{ name: string }>;

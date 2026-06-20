@@ -6,10 +6,13 @@ import type { Database } from "better-sqlite3";
 import type { Instance } from "../../shared/types/index.js";
 import { createId } from "../utils/createId.js";
 import { getInstance } from "./instanceService.js";
+import { appendInstanceRuntimeEvent } from "./instanceRuntimeEventService.js";
+import { getBdsRuntimeState, sendBdsCommand, setBdsMaintenanceState, startBdsForInstance, stopBdsForInstance } from "../bds/bdsRuntimeService.js";
 
 const CONFIG_FILES_TO_BACKUP = ["server.properties", "allowlist.json", "permissions.json"] as const;
 const INTERNAL_BACKUP_PREFIX = "internal";
 const EXPORT_BACKUP_PREFIX = "export";
+const MAINTENANCE_WARNING_DELAY_MS = 10_000;
 
 export type InstanceBackupMode = "internal" | "export";
 
@@ -114,6 +117,10 @@ async function writeZipFromDirectory(sourceDir: string, zipPath: string): Promis
   });
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export async function createInternalRevertBackup(db: Database, instanceId: string): Promise<InstanceBackupRecord> {
   const instance = getInstance(db, instanceId);
   if (!instance) {
@@ -136,13 +143,27 @@ export async function createInternalRevertBackup(db: Database, instanceId: strin
     await copyDirectoryRecursive(worldsDir, join(backupPath, "worlds"));
   }
 
-  return {
+  const record: InstanceBackupRecord = {
     backupId,
     fileName: backupId,
     createdAt,
     mode: "internal",
     path: backupPath,
   };
+
+  await appendInstanceRuntimeEvent(db, instanceId, {
+    category: "backup",
+    action: "backup_created",
+    level: "info",
+    message: "Created an internal revert backup.",
+    details: {
+      backupId,
+      mode: "internal",
+    },
+    createdAt,
+  });
+
+  return record;
 }
 
 export async function restoreConfigFilesFromInternalBackup(db: Database, instanceId: string, backupId: string): Promise<void> {
@@ -188,13 +209,73 @@ export async function createExportBackupZip(db: Database, instanceId: string): P
   await writeZipFromDirectory(stagingPath, zipPath);
   await rm(stagingPath, { recursive: true, force: true });
 
-  return {
+  const record: InstanceBackupRecord = {
     backupId,
     fileName,
     createdAt,
     mode: "export",
     path: zipPath,
   };
+
+  await appendInstanceRuntimeEvent(db, instanceId, {
+    category: "backup",
+    action: "backup_created",
+    level: "info",
+    message: "Created an export backup for download.",
+    details: {
+      backupId,
+      mode: "export",
+      fileName,
+    },
+    createdAt,
+  });
+
+  return record;
+}
+
+export async function createManagedExportBackupZip(db: Database, instanceId: string): Promise<InstanceBackupRecord> {
+  const instance = getInstance(db, instanceId);
+  if (!instance) {
+    throw new Error("Instance not found");
+  }
+
+  const runtimeBeforeBackup = await getBdsRuntimeState(db, instanceId);
+  const wasRunning = runtimeBeforeBackup.isProcessActive;
+
+  try {
+    if (wasRunning) {
+      await setBdsMaintenanceState(
+        db,
+        instanceId,
+        "backup",
+        "Preparing export backup. The instance will stop briefly for maintenance.",
+      );
+      sendBdsCommand(instanceId, "say Server maintenance starting for a backup. The server will shut down shortly.");
+      await sleep(MAINTENANCE_WARNING_DELAY_MS);
+      await stopBdsForInstance(db, instanceId);
+    }
+
+    await setBdsMaintenanceState(
+      db,
+      instanceId,
+      "backup",
+      wasRunning ? "Creating export backup while the instance is offline." : "Creating export backup.",
+    );
+    const backup = await createExportBackupZip(db, instanceId);
+
+    if (wasRunning) {
+      await setBdsMaintenanceState(db, instanceId, "restore", "Restarting the instance after export backup.");
+      await startBdsForInstance(db, instanceId);
+    } else {
+      await setBdsMaintenanceState(db, instanceId, "idle", "Export backup completed.");
+    }
+
+    return backup;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await setBdsMaintenanceState(db, instanceId, "idle", `Export backup failed: ${message}`);
+    throw error;
+  }
 }
 
 export async function getExportBackupRecord(db: Database, instanceId: string, backupId: string): Promise<InstanceBackupRecord> {
