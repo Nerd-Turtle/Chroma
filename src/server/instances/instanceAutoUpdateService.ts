@@ -1,12 +1,16 @@
 import type { Database } from "better-sqlite3";
 import type { FastifyBaseLogger } from "fastify";
-import type { Instance, InstanceUpdateCheckWeekday } from "../../shared/types/index.js";
+import type {
+  Instance,
+  InstanceBdsCheckUpdatesResponse,
+  InstanceUpdateCheckWeekday,
+} from "../../shared/types/index.js";
 import { discoverBdsDownloadUrl } from "../bds/bdsDiscoveryService.js";
 import { getBdsStatusForInstance, installBdsForInstance } from "../bds/bdsInstallService.js";
 import { getBdsRuntimeState, sendBdsCommand, setBdsMaintenanceState, startBdsForInstance, stopBdsForInstance } from "../bds/bdsRuntimeService.js";
 import { getAppSettings } from "../setup/setupService.js";
 import { listInstances } from "./instanceService.js";
-import { getInstance, saveInstance, updateInstanceAutoUpdateCheckAt } from "./instanceRepository.js";
+import { getInstance, saveInstance, updateInstanceAutoUpdateCheckAt, updateInstanceLastCheck } from "./instanceRepository.js";
 import { createInternalRevertBackup, restoreConfigFilesFromInternalBackup } from "./instanceBackupService.js";
 import { appendInstanceRuntimeEvent } from "./instanceRuntimeEventService.js";
 
@@ -144,6 +148,12 @@ async function applyBdsUpdateForInstance(
 
     if (!discovery.version || discovery.version === instance.bdsVersion) {
       logger.info({ instanceId: instance.id, version: discovery.version }, "No BDS update needed");
+      updateInstanceLastCheck(
+        db,
+        instance.id,
+        checkedAt,
+        discovery.version ? "Success" : "Failure",
+      );
       await appendInstanceRuntimeEvent(db, instance.id, {
         category: "update",
         action: "update_not_needed",
@@ -164,7 +174,7 @@ async function applyBdsUpdateForInstance(
     await appendInstanceRuntimeEvent(db, instance.id, {
       category: "update",
       action: "update_started",
-      level: "warning",
+      level: "info",
       message: `Starting BDS update from ${instance.bdsVersion} to ${discovery.version}.`,
       details: {
         currentVersion: instance.bdsVersion,
@@ -211,6 +221,12 @@ async function applyBdsUpdateForInstance(
     }
 
     logger.info({ instanceId: instance.id, version: install.version }, "Completed BDS update");
+    updateInstanceLastCheck(
+      db,
+      instance.id,
+      new Date().toISOString(),
+      "Success",
+    );
     await appendInstanceRuntimeEvent(db, instance.id, {
       category: "update",
       action: "update_completed",
@@ -228,6 +244,7 @@ async function applyBdsUpdateForInstance(
     logger.error({ instanceId: instance.id, error }, "BDS update failed");
     const message = error instanceof Error ? error.message : String(error);
     await setBdsMaintenanceState(db, instance.id, "idle", `BDS update failed: ${message}`);
+    updateInstanceLastCheck(db, instance.id, new Date().toISOString(), "Failure");
     await appendInstanceRuntimeEvent(db, instance.id, {
       category: "update",
       action: "update_failed",
@@ -266,6 +283,69 @@ export async function runManualUpdateForInstance(
   return await applyBdsUpdateForInstance(db, logger, instance, new Date().toISOString(), {
     updateLastCheckAt: false,
   });
+}
+
+export async function runManualCheckForInstance(
+  db: Database,
+  logger: FastifyBaseLogger,
+  instanceId: string,
+): Promise<InstanceBdsCheckUpdatesResponse> {
+  const instance = getInstance(db, instanceId);
+
+  if (!instance) {
+    throw new Error("Instance not found");
+  }
+
+  const checkedAt = new Date().toISOString();
+
+  try {
+    const discovery = await discoverBdsDownloadUrl();
+    const updateAvailable = Boolean(discovery.version && discovery.version !== instance.bdsVersion);
+    const result = discovery.version ? "Success" : "Failure";
+
+    updateInstanceLastCheck(db, instance.id, checkedAt, result);
+
+    await appendInstanceRuntimeEvent(db, instance.id, {
+      category: "update",
+      action: "update_check_completed",
+      level: "info",
+      message: discovery.version
+        ? `Checked for BDS updates. Latest available version is ${discovery.version}.`
+        : "Checked for BDS updates, but the latest version could not be determined.",
+      details: {
+        latestVersion: discovery.version ?? null,
+        currentVersion: instance.bdsVersion,
+        source: "manual",
+      },
+      createdAt: checkedAt,
+    });
+
+    logger.info({ instanceId: instance.id, latestVersion: discovery.version ?? null }, "Completed manual BDS update check");
+
+    return {
+      checkedAt,
+      currentVersion: instance.bdsVersion,
+      updateAvailable,
+      result,
+      ...(discovery.version ? { latestVersion: discovery.version } : {}),
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    updateInstanceLastCheck(db, instance.id, checkedAt, "Failure");
+    await appendInstanceRuntimeEvent(db, instance.id, {
+      category: "update",
+      action: "update_check_failed",
+      level: "error",
+      message: `BDS update check failed: ${message}`,
+      details: {
+        currentVersion: instance.bdsVersion,
+        source: "manual",
+      },
+      createdAt: checkedAt,
+    });
+    logger.error({ instanceId: instance.id, error }, "Manual BDS update check failed");
+    throw error;
+  }
 }
 
 async function runAutoUpdateCycle(db: Database, logger: FastifyBaseLogger): Promise<void> {

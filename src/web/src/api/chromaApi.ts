@@ -3,6 +3,7 @@ import type {
   BdsStartValidationResult,
   CreateInstanceRequest,
   DashboardSummary,
+  InstanceBdsCheckUpdatesResponse,
   InstanceBdsConsoleCommandRequest,
   InstanceBdsConsoleCommandResponse,
   InstanceBdsLogListResponse,
@@ -241,4 +242,12 @@ export async function createExportBackup(instanceId: string): Promise<InstanceBa
 export async function getLatestBdsVersion(): Promise<LatestBdsVersionResponse> {
   const response = await fetch("/api/bds/latest");
   return readJson<LatestBdsVersionResponse>(response);
+}
+
+export async function checkInstanceBdsUpdates(instanceId: string): Promise<InstanceBdsCheckUpdatesResponse> {
+  const response = await fetch(`/api/instances/${instanceId}/bds/check-updates`, {
+    method: "POST",
+  });
+
+  return readJson<InstanceBdsCheckUpdatesResponse>(response);
 }

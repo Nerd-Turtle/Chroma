@@ -30,6 +30,8 @@ export type Instance = {
   updateCheckTime: string;
   updateCheckWeekday: InstanceUpdateCheckWeekday;
   lastAutoUpdateCheckAt?: string;
+  lastCheckAt?: string;
+  lastCheckResult?: string;
   instancePath: string;
   activeWorldName?: string;
   createdAt: string;

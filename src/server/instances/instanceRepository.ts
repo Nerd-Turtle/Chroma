@@ -11,6 +11,8 @@ type InstanceRow = {
   update_check_time: string;
   update_check_weekday: string;
   last_auto_update_check_at: string | null;
+  last_check_at: string | null;
+  last_check_result: string | null;
   instance_path: string;
   active_world_name: string | null;
   created_at: string;
@@ -34,6 +36,14 @@ function mapInstanceRow(row: InstanceRow): Instance {
 
   if (row.last_auto_update_check_at !== null) {
     instance.lastAutoUpdateCheckAt = row.last_auto_update_check_at;
+  }
+
+  if (row.last_check_at !== null) {
+    instance.lastCheckAt = row.last_check_at;
+  }
+
+  if (row.last_check_result !== null) {
+    instance.lastCheckResult = row.last_check_result;
   }
 
   if (row.active_world_name !== null) {
@@ -74,6 +84,8 @@ export function saveInstance(db: Database, instance: Instance): void {
       update_check_time,
       update_check_weekday,
       last_auto_update_check_at,
+      last_check_at,
+      last_check_result,
       instance_path,
       active_world_name,
       created_at,
@@ -88,6 +100,8 @@ export function saveInstance(db: Database, instance: Instance): void {
       @update_check_time,
       @update_check_weekday,
       @last_auto_update_check_at,
+      @last_check_at,
+      @last_check_result,
       @instance_path,
       @active_world_name,
       @created_at,
@@ -102,6 +116,8 @@ export function saveInstance(db: Database, instance: Instance): void {
       update_check_time = excluded.update_check_time,
       update_check_weekday = excluded.update_check_weekday,
       last_auto_update_check_at = excluded.last_auto_update_check_at,
+      last_check_at = excluded.last_check_at,
+      last_check_result = excluded.last_check_result,
       instance_path = excluded.instance_path,
       active_world_name = excluded.active_world_name,
       updated_at = excluded.updated_at;
@@ -118,6 +134,8 @@ export function saveInstance(db: Database, instance: Instance): void {
     update_check_time: instance.updateCheckTime,
     update_check_weekday: instance.updateCheckWeekday,
     last_auto_update_check_at: instance.lastAutoUpdateCheckAt ?? null,
+    last_check_at: instance.lastCheckAt ?? null,
+    last_check_result: instance.lastCheckResult ?? null,
     instance_path: instance.instancePath,
     active_world_name: instance.activeWorldName ?? null,
     created_at: instance.createdAt,
@@ -135,4 +153,15 @@ export function updateInstanceAutoUpdateCheckAt(db: Database, instanceId: string
   db.prepare(
     `UPDATE instances SET last_auto_update_check_at = ?, updated_at = ? WHERE id = ?`
   ).run(checkedAt, new Date().toISOString(), instanceId);
+}
+
+export function updateInstanceLastCheck(
+  db: Database,
+  instanceId: string,
+  checkedAt: string,
+  result: string,
+): void {
+  db.prepare(
+    `UPDATE instances SET last_check_at = ?, last_check_result = ?, updated_at = ? WHERE id = ?`
+  ).run(checkedAt, result, new Date().toISOString(), instanceId);
 }

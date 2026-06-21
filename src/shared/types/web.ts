@@ -160,6 +160,14 @@ export type LatestBdsVersionResponse = {
   downloadUrl: string;
 };
 
+export type InstanceBdsCheckUpdatesResponse = {
+  checkedAt: string;
+  currentVersion: string;
+  latestVersion?: string;
+  updateAvailable: boolean;
+  result: string;
+};
+
 export type InstanceBackupResponse = {
   backupId: string;
   fileName: string;

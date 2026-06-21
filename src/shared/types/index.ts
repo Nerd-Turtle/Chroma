@@ -46,6 +46,7 @@ export type {
   BdsStartValidationIssue,
   BdsStartValidationResult,
   LatestBdsVersionResponse,
+  InstanceBdsCheckUpdatesResponse,
   InstanceBackupResponse,
   UpdateInstanceServerPropertiesRequest,
 } from "./web.js";

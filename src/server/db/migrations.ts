@@ -12,6 +12,8 @@ export function runMigrations(db: Database): void {
       update_check_time TEXT NOT NULL DEFAULT '03:00',
       update_check_weekday TEXT NOT NULL DEFAULT 'sunday',
       last_auto_update_check_at TEXT,
+      last_check_at TEXT,
+      last_check_result TEXT,
       instance_path TEXT NOT NULL,
       active_world_name TEXT,
       created_at TEXT NOT NULL,
@@ -109,5 +111,13 @@ export function runMigrations(db: Database): void {
 
   if (!columnNames.has("last_auto_update_check_at")) {
     db.exec(`ALTER TABLE instances ADD COLUMN last_auto_update_check_at TEXT;`);
+  }
+
+  if (!columnNames.has("last_check_at")) {
+    db.exec(`ALTER TABLE instances ADD COLUMN last_check_at TEXT;`);
+  }
+
+  if (!columnNames.has("last_check_result")) {
+    db.exec(`ALTER TABLE instances ADD COLUMN last_check_result TEXT;`);
   }
 }

@@ -1,4 +1,4 @@
-import { ArrowDownToLine, LoaderCircle, Play, RotateCw, Save, Square, Terminal } from "lucide-react";
+import { ArrowDownToLine, LoaderCircle, Play, RotateCw, Save, Square, SquarePen, Terminal } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import type {
   BdsStartValidationResult,
@@ -24,6 +24,7 @@ import {
   getInstanceRuntimeEvents,
   getInstanceServerProperties,
   getInstanceSettings,
+  checkInstanceBdsUpdates,
   getLatestBdsVersion,
   manualUpdateInstanceBds,
   restartInstanceBds,
@@ -77,14 +78,14 @@ type LogViewerState = {
   tailView: boolean;
 };
 
-type BannerTone = "success" | "warning" | "alert";
+type BannerTone = "info" | "warning" | "error";
 
 type BannerState = {
   message: string;
   tone: BannerTone;
 };
 
-type WorkspaceNoticeTone = "info" | "success" | "warning" | "alert";
+type WorkspaceNoticeTone = "info" | "warning" | "error";
 
 type WorkspaceNotice = {
   id: string;
@@ -130,16 +131,30 @@ function formatEventAction(value: string): string {
   return formatLabel(value);
 }
 
+function getLastCheckSummary(instance: Instance): { result: string; timestamp: string } {
+  if (instance.lastCheckAt && instance.lastCheckResult) {
+    return {
+      result: instance.lastCheckResult,
+      timestamp: formatTimestamp(instance.lastCheckAt),
+    };
+  }
+
+  return {
+    result: "Success",
+    timestamp: formatTimestamp(instance.createdAt),
+  };
+}
+
 function getEventToneClass(level: InstanceRuntimeEvent["level"]): string {
   if (level === "error") {
-    return "status-alert";
+    return "status-error";
   }
 
   if (level === "warning") {
     return "status-warning";
   }
 
-  return "status-current";
+  return "status-info";
 }
 
 function parseServerPropertiesPreview(content: string): Array<{ key: string; value: string }> {
@@ -165,6 +180,7 @@ function parseServerPropertiesPreview(content: string): Array<{ key: string; val
 const DEFAULT_BDS_VERSION = "latest";
 const DEFAULT_UPDATE_TIME = "03:00";
 const DEFAULT_UPDATE_WEEKDAY = "sunday";
+const LIST_PANE_WIDTH_PX = 525;
 
 function ActionIcon({ active, children }: { active: boolean; children: ReactNode }) {
   if (active) {
@@ -172,10 +188,6 @@ function ActionIcon({ active, children }: { active: boolean; children: ReactNode
   }
 
   return <>{children}</>;
-}
-
-function getDefaultListPaneWidth(): number {
-  return Math.max(320, Math.min(window.innerWidth * 0.4, window.innerWidth - 320));
 }
 
 function getBdsListStatus(instance: Instance, bds?: BdsInstall): string {
@@ -203,7 +215,7 @@ function getRuntimeListStatus(instance: Instance): string {
 }
 
 function getAutoUpdateListStatus(instance: Instance): string {
-  return instance.automaticUpdatesEnabled ? "Enabled" : "Disabled";
+  return instance.automaticUpdatesEnabled ? "Auto" : "Manual";
 }
 
 function getVersionListStatus(instance: Instance, bds?: BdsInstall, latestBdsVersion?: string): string {
@@ -227,7 +239,7 @@ function getVersionListStatus(instance: Instance, bds?: BdsInstall, latestBdsVer
     return "Current";
   }
 
-  return `Update available: ${latestBdsVersion}`;
+  return "Update Available";
 }
 
 function getRuntimeStatusSummary(runtime: BdsRuntimeState): string {
@@ -251,16 +263,12 @@ function getRuntimeStatusSummary(runtime: BdsRuntimeState): string {
 }
 
 function getWorkspaceNoticeToneClass(tone: WorkspaceNoticeTone): string {
-  if (tone === "success") {
-    return "workspace-notice-success";
-  }
-
   if (tone === "warning") {
     return "workspace-notice-warning";
   }
 
-  if (tone === "alert") {
-    return "workspace-notice-alert";
+  if (tone === "error") {
+    return "workspace-notice-error";
   }
 
   return "workspace-notice-info";
@@ -282,7 +290,7 @@ function buildWorkspaceNotices(
     for (const issue of validation.errors) {
       notices.push({
         id: `validation-error-${issue.code}-${issue.message}`,
-        tone: "alert",
+        tone: "error",
         title: "Start blocked",
         message: issue.message,
       });
@@ -317,7 +325,7 @@ function buildWorkspaceNotices(
   } else if (runtime.status === "unknown") {
     notices.push({
       id: "runtime-unknown",
-      tone: "alert",
+      tone: "error",
       title: "Runtime unknown",
       message:
         runtime.message ??
@@ -326,23 +334,16 @@ function buildWorkspaceNotices(
   } else if (runtime.status === "error") {
     notices.push({
       id: "runtime-error",
-      tone: "alert",
+      tone: "error",
       title: "Runtime error",
       message: runtime.message ?? "The instance encountered a runtime error. Review recent activity and logs for more detail.",
-    });
-  } else if (!runtime.isProcessActive && bds.status === "installed" && runtime.status === "stopped") {
-    notices.push({
-      id: "runtime-ready",
-      tone: "success",
-      title: "Ready to start",
-      message: "The instance is stopped, BDS is installed, and Chroma is ready to start it.",
     });
   }
 
   if (bds.status === "error") {
     notices.push({
       id: "install-error",
-      tone: "alert",
+      tone: "error",
       title: "BDS install error",
       message: bds.error ?? "BDS is not currently in a healthy installed state for this instance.",
     });
@@ -351,18 +352,9 @@ function buildWorkspaceNotices(
   if (latestBdsVersion && instance.bdsVersion !== latestBdsVersion) {
     notices.push({
       id: `update-available-${latestBdsVersion}`,
-      tone: "warning",
+      tone: "info",
       title: "Update available",
       message: `This instance is on ${instance.bdsVersion}. The latest available BDS version is ${latestBdsVersion}.`,
-    });
-  }
-
-  if (runtime.message && notices.every((notice) => notice.message !== runtime.message)) {
-    notices.push({
-      id: "runtime-note",
-      tone: "info",
-      title: "Runtime note",
-      message: runtime.message,
     });
   }
 
@@ -370,7 +362,6 @@ function buildWorkspaceNotices(
 }
 
 const InstancesPage = () => {
-  const dragState = useRef<{ startX: number; startWidth: number } | null>(null);
   const updateMenuRef = useRef<HTMLDivElement | null>(null);
   const consoleEventSourceRef = useRef<EventSource | null>(null);
   const consoleOutputRef = useRef<HTMLDivElement | null>(null);
@@ -388,7 +379,6 @@ const InstancesPage = () => {
   const [serverPropertiesSaving, setServerPropertiesSaving] = useState(false);
   const [serverPropertiesData, setServerPropertiesData] = useState<ServerPropertiesEditorState | null>(null);
   const [serverPropertiesError, setServerPropertiesError] = useState("");
-  const [serverPropertiesNotice, setServerPropertiesNotice] = useState("");
   const [consoleOpen, setConsoleOpen] = useState(false);
   const [consoleConnecting, setConsoleConnecting] = useState(false);
   const [consoleSession, setConsoleSession] = useState<ConsoleSessionState>({
@@ -433,9 +423,9 @@ const InstancesPage = () => {
     updateCheckTime: DEFAULT_UPDATE_TIME,
     updateCheckWeekday: DEFAULT_UPDATE_WEEKDAY,
   });
-  const [listPaneWidth, setListPaneWidth] = useState(getDefaultListPaneWidth);
   const [error, setError] = useState("");
   const [startValidationFeedback, setStartValidationFeedback] = useState<BdsStartValidationResult | null>(null);
+  const [dismissedWorkspaceNoticeIds, setDismissedWorkspaceNoticeIds] = useState<string[]>([]);
 
   const canStartSelectedInstance =
     workspaceData !== null &&
@@ -454,7 +444,9 @@ const InstancesPage = () => {
     actionInFlight === "" &&
     workspaceData.runtime.isProcessActive &&
     workspaceData.runtime.status !== "stopping";
-  const workspaceNotices = buildWorkspaceNotices(workspaceData, latestBdsVersion, startValidationFeedback);
+  const workspaceNotices = buildWorkspaceNotices(workspaceData, latestBdsVersion, startValidationFeedback).filter(
+    (notice) => !dismissedWorkspaceNoticeIds.includes(notice.id),
+  );
 
   async function loadInstances(preferredInstanceId?: string) {
     setListLoading(true);
@@ -555,7 +547,6 @@ const InstancesPage = () => {
       setServerPropertiesEditorOpen(false);
       setServerPropertiesData(null);
       setServerPropertiesError("");
-      setServerPropertiesNotice("");
       setUpdateMenuOpen(false);
       setEditingInstance(false);
       setConsoleOpen(false);
@@ -673,6 +664,7 @@ const InstancesPage = () => {
 
   useEffect(() => {
     setActiveTab("overview");
+    setDismissedWorkspaceNoticeIds([]);
   }, [rightPaneMode, selectedInstanceId]);
 
   useEffect(() => {
@@ -709,31 +701,6 @@ const InstancesPage = () => {
       window.clearInterval(timer);
     };
   }, [actionInFlight, selectedInstanceId]);
-
-  useEffect(() => {
-    function handlePointerMove(event: PointerEvent) {
-      if (!dragState.current) {
-        return;
-      }
-
-      const nextWidth = dragState.current.startWidth + (event.clientX - dragState.current.startX);
-      const maxWidth = Math.max(420, Math.min(window.innerWidth * 0.7, window.innerWidth - 320));
-      setListPaneWidth(Math.max(280, Math.min(maxWidth, nextWidth)));
-    }
-
-    function handlePointerUp() {
-      dragState.current = null;
-      document.body.classList.remove("is-resizing");
-    }
-
-    window.addEventListener("pointermove", handlePointerMove);
-    window.addEventListener("pointerup", handlePointerUp);
-
-    return () => {
-      window.removeEventListener("pointermove", handlePointerMove);
-      window.removeEventListener("pointerup", handlePointerUp);
-    };
-  }, []);
 
   async function refreshSelectedInstance(instanceId: string) {
     const [instanceResult, settingsResult, bdsResult, runtimeResult, eventsResult] = await Promise.all([
@@ -975,23 +942,23 @@ const InstancesPage = () => {
     setUpdateMenuOpen(false);
 
     try {
-      const latestResult = await getLatestBdsVersion();
-      setLatestBdsVersion(latestResult.version ?? "");
+      const result = await checkInstanceBdsUpdates(selectedInstanceId);
+      setLatestBdsVersion(result.latestVersion ?? "");
       await loadInstances(selectedInstanceId);
       await refreshSelectedInstance(selectedInstanceId);
 
-      if (!latestResult.version) {
+      if (!result.latestVersion) {
         setBanner({ message: "Unable to determine the latest BDS version right now.", tone: "warning" });
         return;
       }
 
-      if (latestResult.version === workspaceData.instance.bdsVersion) {
-        setBanner({ message: `No updates available. This instance is already on ${latestResult.version}.`, tone: "success" });
+      if (!result.updateAvailable) {
+        setBanner({ message: `No updates available. This instance is already on ${result.latestVersion}.`, tone: "info" });
         return;
       }
 
       setBanner({
-        message: `Update available: ${latestResult.version}. Current instance version: ${workspaceData.instance.bdsVersion}.`,
+        message: `Update available: ${result.latestVersion}. Current instance version: ${result.currentVersion}.`,
         tone: "warning",
       });
     } catch (checkError) {
@@ -1016,7 +983,7 @@ const InstancesPage = () => {
       setLatestBdsVersion(latestResult.version ?? "");
 
       if (latestResult.version && workspaceData && latestResult.version === workspaceData.instance.bdsVersion) {
-        setBanner({ message: `No updates available. This instance is already on ${latestResult.version}.`, tone: "success" });
+        setBanner({ message: `No updates available. This instance is already on ${latestResult.version}.`, tone: "info" });
         return;
       }
 
@@ -1030,7 +997,7 @@ const InstancesPage = () => {
         message: latestResult.version
           ? `Update complete. Instance is now on ${latestResult.version}.`
           : "Update check completed.",
-        tone: "success",
+        tone: "info",
       });
     } catch (updateError) {
       setError(updateError instanceof Error ? updateError.message : "Unable to update BDS");
@@ -1047,7 +1014,6 @@ const InstancesPage = () => {
     setServerPropertiesLoading(true);
     setServerPropertiesError("");
     if (!backgroundOnly) {
-      setServerPropertiesNotice("");
       setServerPropertiesEditorOpen(true);
     }
 
@@ -1072,7 +1038,6 @@ const InstancesPage = () => {
 
     setServerPropertiesEditorOpen(false);
     setServerPropertiesError("");
-    setServerPropertiesNotice("");
   };
 
   const updateServerPropertiesContent = (content: string) => {
@@ -1097,7 +1062,6 @@ const InstancesPage = () => {
 
     setServerPropertiesSaving(true);
     setServerPropertiesError("");
-    setServerPropertiesNotice("");
 
     try {
       const result = await updateInstanceServerProperties(selectedInstanceId, {
@@ -1111,11 +1075,6 @@ const InstancesPage = () => {
       });
       await loadInstances(selectedInstanceId);
       await refreshSelectedInstance(selectedInstanceId);
-      setServerPropertiesNotice(
-        result.restartRequired
-          ? "server.properties saved. Restart the server for changes to take effect."
-          : "server.properties saved.",
-      );
     } catch (saveError) {
       setServerPropertiesError(saveError instanceof Error ? saveError.message : "Unable to save server.properties");
     } finally {
@@ -1126,7 +1085,7 @@ const InstancesPage = () => {
   return (
     <section className="instances-layout">
       {error ? (
-        <div className="status-banner status-banner-alert" role="alert">
+        <div className="status-banner status-banner-error" role="alert">
           <span>{error}</span>
           <button type="button" className="status-banner-close" onClick={() => setError("")} aria-label="Dismiss alert">
             Close
@@ -1150,7 +1109,7 @@ const InstancesPage = () => {
       <section
         className="instances-workspace"
         style={{
-          gridTemplateColumns: `${listPaneWidth}px minmax(0, 1fr)`,
+          gridTemplateColumns: `${LIST_PANE_WIDTH_PX}px minmax(0, 1fr)`,
         }}
       >
         <aside className="instances-list-pane">
@@ -1175,7 +1134,7 @@ const InstancesPage = () => {
                 <div className="instance-list-header" role="presentation">
                   <span>Instance Name</span>
                   <span>Status</span>
-                  <span>Auto-update</span>
+                  <span>Updates</span>
                   <span>Version</span>
                 </div>
                 <div className="instance-list">
@@ -1202,14 +1161,14 @@ const InstancesPage = () => {
                           <strong>{instance.friendlyName}</strong>
                           <small>{instance.bdsVersion}</small>
                         </span>
-                        <span className={`instance-bds-status status-${runtimeStatus.toLowerCase().replace(/ /g, "-")}`}>
+                        <span className={`instance-list-status status-${runtimeStatus.toLowerCase().replace(/ /g, "-")}`}>
                           {runtimeStatus}
                         </span>
-                        <span className={autoUpdateStatus === "Enabled" ? "instance-bds-status status-current" : "instance-bds-status status-not_installed"}>
+                        <span className={autoUpdateStatus === "Auto" ? "instance-list-status status-current" : "instance-list-status status-not_installed"}>
                           {autoUpdateStatus}
                         </span>
                         <span
-                          className={`instance-bds-status status-${(
+                          className={`instance-list-status status-${(
                             versionStatus.startsWith("Update available")
                               ? "update-available"
                               : versionStatus.toLowerCase().replace(/ /g, "-")
@@ -1243,14 +1202,7 @@ const InstancesPage = () => {
             className="instances-divider"
             role="separator"
             aria-orientation="vertical"
-            aria-label="Resize instances workspace"
-            onPointerDown={(event) => {
-              dragState.current = {
-                startX: event.clientX,
-                startWidth: listPaneWidth,
-              };
-              document.body.classList.add("is-resizing");
-            }}
+            aria-label="Instances workspace divider"
           />
         </aside>
 
@@ -1339,6 +1291,28 @@ const InstancesPage = () => {
                       <RotateCw aria-hidden="true" />
                     </ActionIcon>
                   </button>
+                  {activeTab === "overview" ? (
+                    <button
+                      type="button"
+                      className="icon-action"
+                      onClick={() => setEditingInstance(true)}
+                      title="Edit overview"
+                      aria-label="Edit overview"
+                    >
+                      <SquarePen aria-hidden="true" />
+                    </button>
+                  ) : null}
+                  {activeTab === "properties" ? (
+                    <button
+                      type="button"
+                      className="icon-action"
+                      onClick={() => void openServerPropertiesEditor()}
+                      title="Edit server.properties"
+                      aria-label="Edit server.properties"
+                    >
+                      <SquarePen aria-hidden="true" />
+                    </button>
+                  ) : null}
                   <button
                     type="button"
                     className="icon-action"
@@ -1521,39 +1495,34 @@ const InstancesPage = () => {
 
             {rightPaneMode === "details" && !detailsLoading && workspaceData ? (
               <div className="instances-detail-body">
-                <div className="instances-detail-toolbar">
-                  <div className="instances-detail-toolbar-spacer" aria-hidden="true" />
-                  <div className="instances-detail-toolbar-actions">
-                    {activeTab === "overview" && !editingInstance ? (
-                      <button type="button" className="secondary-button" onClick={() => setEditingInstance(true)}>
-                        Edit
-                      </button>
-                    ) : null}
-
-                    {activeTab === "properties" ? (
-                      <button type="button" className="secondary-button" onClick={() => void openServerPropertiesEditor()}>
-                        Edit
-                      </button>
-                    ) : null}
-                  </div>
-                </div>
-
-                {workspaceNotices.length > 0 ? (
-                  <section className="workspace-notice-stack" aria-label="Instance runtime summary">
-                    {workspaceNotices.map((notice) => (
-                      <article key={notice.id} className={`workspace-notice ${getWorkspaceNoticeToneClass(notice.tone)}`}>
-                        <div className="workspace-notice-copy">
-                          <strong>{notice.title}</strong>
-                          <p>{notice.message}</p>
-                        </div>
-                      </article>
-                    ))}
-                  </section>
-                ) : null}
-
                 {activeTab === "overview" ? (
                   <div className="instance-overview-stack">
-                    <div className="instance-details-sections">
+                    <div className="instance-overview-summary">
+                      {workspaceNotices.length > 0 ? (
+                        <section className="workspace-notice-stack" aria-label="Instance runtime summary">
+                          {workspaceNotices.map((notice) => (
+                            <article key={notice.id} className={`workspace-notice ${getWorkspaceNoticeToneClass(notice.tone)}`}>
+                              <div className="workspace-notice-copy">
+                                <strong>{notice.title}</strong>
+                                <p>{notice.message}</p>
+                              </div>
+                              <button
+                                type="button"
+                                className="workspace-notice-close"
+                                onClick={() =>
+                                  setDismissedWorkspaceNoticeIds((current) =>
+                                    current.includes(notice.id) ? current : [...current, notice.id],
+                                  )
+                                }
+                                aria-label={`Dismiss ${notice.title}`}
+                              >
+                                Close
+                              </button>
+                            </article>
+                          ))}
+                        </section>
+                      ) : null}
+                      <div className="instance-details-sections instance-overview-details">
                       <section className="instance-detail-section">
                         <dl className="instance-detail-list">
                           <div><dt>Name</dt><dd>{workspaceData.instance.friendlyName}</dd></div>
@@ -1565,57 +1534,58 @@ const InstancesPage = () => {
                           {workspaceData.instance.automaticUpdatesEnabled ? (
                             <div><dt>Check time</dt><dd>{workspaceData.instance.updateCheckTime}</dd></div>
                           ) : null}
-                          <div><dt>Last check</dt><dd>{formatTimestamp(workspaceData.instance.lastAutoUpdateCheckAt)}</dd></div>
+                          <div>
+                            <dt>Last check</dt>
+                            <dd className="instance-last-check">
+                              <span>{getLastCheckSummary(workspaceData.instance).result}</span>
+                              <small>{getLastCheckSummary(workspaceData.instance).timestamp}</small>
+                            </dd>
+                          </div>
                         </dl>
                       </section>
 
                       <section className="instance-detail-section">
                         <dl className="instance-detail-list">
-                          <div><dt>Path</dt><dd>{workspaceData.instance.instancePath}</dd></div>
                           <div><dt>Installed version</dt><dd>{workspaceData.bds.version ?? "Not installed"}</dd></div>
-                          <div><dt>Desired state</dt><dd>{formatLabel(workspaceData.runtime.desiredStatus)}</dd></div>
-                          <div><dt>Process state</dt><dd>{getRuntimeStatusSummary(workspaceData.runtime)}</dd></div>
+                          <div><dt>Status</dt><dd>{getRuntimeStatusSummary(workspaceData.runtime)}</dd></div>
                           <div><dt>Health</dt><dd>{formatLabel(workspaceData.runtime.healthStatus)}</dd></div>
-                          <div><dt>Maintenance</dt><dd>{formatLabel(workspaceData.runtime.maintenanceStatus)}</dd></div>
-                          <div><dt>Last observed</dt><dd>{formatTimestamp(workspaceData.runtime.observedAt)}</dd></div>
                           <div><dt>PID</dt><dd>{workspaceData.runtime.pid ?? "Not running"}</dd></div>
-                          {workspaceData.runtime.message ? (
-                            <div><dt>Runtime note</dt><dd>{workspaceData.runtime.message}</dd></div>
-                          ) : null}
-                          {workspaceData.runtime.recentLogTail && workspaceData.runtime.recentLogTail.length > 0 ? (
-                            <div>
-                              <dt>Recent output</dt>
-                              <dd className="instance-detail-log-tail">{workspaceData.runtime.recentLogTail.join("\n")}</dd>
-                            </div>
-                          ) : null}
+                          <div><dt>Path</dt><dd>{workspaceData.instance.instancePath}</dd></div>
                         </dl>
                       </section>
                     </div>
+                    </div>
 
-                    <section className="instance-detail-section instance-detail-section-wide">
+                    <section className="instance-detail-section instance-detail-section-wide instance-overview-activity">
                       <div className="instance-detail-section-header">
                         <h3>Recent activity</h3>
                       </div>
-                      {workspaceData.events.length === 0 ? (
-                        <p className="muted-copy">No instance activity has been recorded yet.</p>
-                      ) : (
-                        <div className="instance-event-list">
-                          {workspaceData.events.map((event) => (
-                            <article key={event.id} className="instance-event-row">
-                              <div className="instance-event-row-top">
-                                <span className={`instance-bds-status ${getEventToneClass(event.level)}`}>
+                      <div className="instance-overview-activity-body">
+                        {workspaceData.events.length === 0 ? (
+                          <p className="muted-copy">No instance activity has been recorded yet.</p>
+                        ) : (
+                          <div className="instance-event-table" role="table" aria-label="Instance activity">
+                            <div className="instance-event-table-header" role="row">
+                              <span role="columnheader">Level</span>
+                              <span role="columnheader">Action</span>
+                              <span role="columnheader">Time</span>
+                              <span role="columnheader">Message</span>
+                            </div>
+                            {workspaceData.events.map((event) => (
+                              <article key={event.id} className="instance-event-table-row" role="row">
+                                <span className={`instance-bds-status ${getEventToneClass(event.level)}`} role="cell">
                                   {formatLabel(event.level)}
                                 </span>
-                                <span className="instance-event-action">{formatEventAction(event.action)}</span>
-                                <time className="instance-event-time" dateTime={event.createdAt}>
+                                <span className="instance-event-action" role="cell">{formatEventAction(event.action)}</span>
+                                <time className="instance-event-time" dateTime={event.createdAt} role="cell">
                                   {formatTimestamp(event.createdAt)}
                                 </time>
-                              </div>
-                              <p className="instance-event-message">{event.message}</p>
-                            </article>
-                          ))}
-                        </div>
-                      )}
+                                <span className="instance-event-message" role="cell">{event.message}</span>
+                              </article>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     </section>
                   </div>
                 ) : null}
@@ -1792,7 +1762,6 @@ const InstancesPage = () => {
 
                   {serverPropertiesLoading ? <p className="muted-copy">Loading server.properties...</p> : null}
                   {serverPropertiesError ? <div className="form-error">{serverPropertiesError}</div> : null}
-                  {serverPropertiesNotice ? <div className="instances-inline-note">{serverPropertiesNotice}</div> : null}
 
                   {!serverPropertiesLoading && serverPropertiesData ? (
                     <form className="server-properties-editor" onSubmit={handleSaveServerProperties}>

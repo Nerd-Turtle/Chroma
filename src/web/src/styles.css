@@ -129,7 +129,7 @@ body.is-resizing {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 0.75rem;
+  gap: 0.6rem;
 }
 
 .page-frame {
@@ -210,7 +210,8 @@ h2 {
   background: rgba(255, 255, 255, 0.04);
   color: #f6f7fb;
   border-radius: 0.9rem;
-  padding: 0.9rem 1rem;
+  padding: 0.9rem 1.15rem;
+  line-height: 1.4;
 }
 
 .form-grid input:focus,
@@ -284,7 +285,7 @@ h2 {
     0 12px 28px rgba(0, 0, 0, 0.16);
 }
 
-.status-banner-success {
+.status-banner-info {
   color: #def7e8;
   background: linear-gradient(180deg, rgba(26, 63, 45, 0.88), rgba(16, 41, 30, 0.92));
   border-color: rgba(96, 210, 145, 0.22);
@@ -296,7 +297,7 @@ h2 {
   border-color: rgba(255, 204, 107, 0.24);
 }
 
-.status-banner-alert {
+.status-banner-error {
   color: #ffd9d8;
   background: linear-gradient(180deg, rgba(82, 24, 24, 0.9), rgba(56, 16, 16, 0.94));
   border-color: rgba(255, 109, 109, 0.26);
@@ -335,7 +336,7 @@ h2 {
 
 .status-row {
   display: flex;
-  gap: 0.75rem;
+  gap: 0.6rem;
   flex-wrap: wrap;
 }
 
@@ -515,10 +516,8 @@ h2 {
 }
 
 .instances-detail-body {
-  min-height: 0;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  gap: 0.4rem;
+  min-height: 0;
   overflow: hidden;
 }
 
@@ -529,12 +528,11 @@ h2 {
 .instances-divider {
   position: absolute;
   top: 0;
-  right: -6px;
+  right: 0;
   bottom: 0;
-  cursor: col-resize;
-  width: 12px;
+  width: 1px;
   z-index: 3;
-  background: transparent;
+  pointer-events: none;
 }
 
 .instances-divider::before {
@@ -542,10 +540,9 @@ h2 {
   position: absolute;
   top: 0;
   bottom: 0;
-  left: 50%;
-  width: 2px;
-  transform: translateX(-50%);
-  background: var(--chrome-divider);
+  left: 0;
+  width: 1px;
+  background: var(--chrome-divider-strong);
   box-shadow:
     -1px 0 0 rgba(0, 0, 0, 0.12),
     1px 0 0 rgba(255, 255, 255, 0.03);
@@ -572,8 +569,8 @@ h2 {
 .instance-list-header,
 .instance-list-item {
   display: grid;
-  grid-template-columns: minmax(12rem, 1.35fr) 8.5rem 9.5rem minmax(12rem, 1.2fr);
-  gap: 1rem;
+  grid-template-columns: 12rem 5rem 5rem 5rem;
+  gap: 0.6rem;
   align-items: center;
 }
 
@@ -583,6 +580,18 @@ h2 {
   font-size: 0.78rem;
   text-transform: uppercase;
   letter-spacing: 0.1em;
+}
+
+.instance-list-header > :first-child,
+.instance-list-item > :first-child {
+  justify-self: start;
+  text-align: left;
+}
+
+.instance-list-header > :not(:first-child),
+.instance-list-item > :not(:first-child) {
+  justify-self: center;
+  text-align: center;
 }
 
 .instance-list {
@@ -631,28 +640,43 @@ h2 {
   font-size: 0.82rem;
 }
 
-.instance-bds-status {
-  justify-self: start;
+.instance-list-status {
+  justify-self: center;
+  text-align: center;
   max-width: 100%;
-  padding: 0.35rem 0.6rem;
-  border-radius: 999px;
   font-size: 0.82rem;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.04);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  font-weight: 500;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.instance-bds-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.82rem;
+  font-weight: 500;
 }
 
 .status-running,
 .status-installed {
-  background: rgba(96, 210, 145, 0.16);
-  border-color: rgba(96, 210, 145, 0.22);
+  color: #8ee0a9;
 }
 
 .status-current {
-  background: rgba(96, 210, 145, 0.16);
-  border-color: rgba(96, 210, 145, 0.22);
+  color: #8ee0a9;
+}
+
+.status-info {
+  color: #8ee0a9;
+}
+
+.status-warning {
+  color: #f3c66d;
 }
 
 .status-starting,
@@ -661,31 +685,29 @@ h2 {
 .status-updating,
 .status-backing_up,
 .status-restoring {
-  background: rgba(255, 204, 107, 0.14);
-  border-color: rgba(255, 204, 107, 0.22);
+  color: #f3c66d;
 }
 
 .status-stopped,
 .status-not_installed {
-  background: rgba(255, 255, 255, 0.05);
-  border-color: rgba(255, 255, 255, 0.08);
+  color: #c0c8d6;
 }
 
 .status-update-available {
-  background: rgba(255, 204, 107, 0.14);
-  border-color: rgba(255, 204, 107, 0.22);
+  color: #f3c66d;
+}
+
+.status-unknown {
+  color: #f3c66d;
 }
 
 .status-error {
-  background: rgba(255, 109, 109, 0.14);
-  border-color: rgba(255, 109, 109, 0.22);
+  color: #ff9c9c;
 }
 
 .status-checking,
-.status-unknown,
 .status-degraded {
-  background: rgba(126, 182, 255, 0.14);
-  border-color: rgba(126, 182, 255, 0.16);
+  color: #9ec2ff;
 }
 
 .instances-create-form {
@@ -703,7 +725,7 @@ h2 {
 
 .workspace-notice-stack {
   display: grid;
-  gap: 0.75rem;
+  gap: 0.6rem;
   margin-bottom: 1rem;
 }
 
@@ -713,6 +735,10 @@ h2 {
   border-radius: 0.95rem;
   padding: 0.9rem 1rem;
   background: rgba(255, 255, 255, 0.03);
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
 }
 
 .workspace-notice-copy {
@@ -730,12 +756,22 @@ h2 {
   line-height: 1.55;
 }
 
-.workspace-notice-info {
-  border-left-color: rgba(124, 196, 255, 0.5);
-  background: rgba(124, 196, 255, 0.08);
+.workspace-notice-close {
+  border: 0;
+  background: transparent;
+  color: #a9b3c4;
+  padding: 0;
+  line-height: 1;
+  white-space: nowrap;
 }
 
-.workspace-notice-success {
+.workspace-notice-close:hover,
+.workspace-notice-close:focus-visible {
+  color: #f5f7fb;
+}
+
+
+.workspace-notice-info {
   border-left-color: rgba(96, 210, 145, 0.6);
   background: rgba(96, 210, 145, 0.08);
 }
@@ -745,7 +781,7 @@ h2 {
   background: rgba(255, 204, 107, 0.08);
 }
 
-.workspace-notice-alert {
+.workspace-notice-error {
   border-left-color: rgba(255, 109, 109, 0.6);
   background: rgba(255, 109, 109, 0.08);
 }
@@ -815,7 +851,7 @@ h2 {
 .instances-form-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.75rem;
+  gap: 0.6rem;
 }
 
 .server-properties-editor {
@@ -835,7 +871,7 @@ h2 {
 .instance-console-meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.65rem;
+  gap: 0.6rem;
 }
 
 .instance-console-output {
@@ -853,7 +889,7 @@ h2 {
 .instance-console-line {
   display: grid;
   grid-template-columns: auto auto minmax(0, 1fr);
-  gap: 0.75rem;
+  gap: 0.6rem;
   align-items: start;
   font: 0.92rem/1.5 "SFMono-Regular", "Consolas", "Liberation Mono", monospace;
 }
@@ -923,7 +959,7 @@ h2 {
 .instances-control-bar {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.75rem;
+  gap: 0.6rem;
   align-items: center;
 }
 
@@ -1072,11 +1108,41 @@ h2 {
 
 .instance-overview-stack {
   min-height: 0;
+  height: 100%;
   display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
   gap: 1.5rem;
+  overflow: hidden;
+  overflow-x: hidden;
+  align-content: stretch;
+}
+
+.instance-overview-summary {
+  display: grid;
+  gap: 1rem;
+  align-content: start;
+  min-height: 0;
+}
+
+.instance-overview-details {
+  overflow: visible;
+}
+
+.instance-overview-details .instance-detail-section {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.instance-overview-activity {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.instance-overview-activity-body {
+  min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  align-content: start;
 }
 
 .instance-details-sections-single {
@@ -1112,7 +1178,7 @@ h2 {
 
 .instance-detail-list {
   display: grid;
-  gap: 0.75rem;
+  gap: 0.6rem;
   margin: 0;
 }
 
@@ -1134,10 +1200,14 @@ h2 {
   word-break: break-word;
 }
 
-.instance-detail-log-tail {
-  white-space: pre-wrap;
-  font: 0.92rem/1.5 "SFMono-Regular", "Consolas", "Liberation Mono", monospace;
-  color: #dfe7f5;
+.instance-last-check {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.instance-last-check small {
+  color: #8fa0bb;
+  font-size: 0.88rem;
 }
 
 .instance-detail-list-properties {
@@ -1145,28 +1215,37 @@ h2 {
   column-gap: 1.5rem;
 }
 
-.instance-event-list {
+.instance-event-table {
   display: grid;
-  gap: 0.9rem;
-}
-
-.instance-event-row {
-  display: grid;
-  gap: 0.45rem;
-  padding: 0.9rem 0 0;
   border-top: 1px solid rgba(125, 142, 170, 0.18);
 }
 
-.instance-event-row:first-child {
-  border-top: 0;
-  padding-top: 0;
+.instance-event-table-header,
+.instance-event-table-row {
+  display: grid;
+  grid-template-columns: 6rem minmax(10rem, 13rem) minmax(12rem, 16rem) minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
 }
 
-.instance-event-row-top {
+.instance-event-table-header {
+  min-height: 3rem;
+  padding: 0.35rem 0 0.35rem;
+  color: #8fa0bb;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  align-items: center;
+}
+
+.instance-event-table-header > span {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
-  flex-wrap: wrap;
+}
+
+.instance-event-table-row {
+  padding: 0.95rem 0;
+  border-top: 1px solid rgba(125, 142, 170, 0.18);
 }
 
 .instance-event-action {
@@ -1180,7 +1259,6 @@ h2 {
 }
 
 .instance-event-message {
-  margin: 0;
   color: #eef3fb;
   line-height: 1.5;
 }
@@ -1188,7 +1266,7 @@ h2 {
 .instance-log-toolbar {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.75rem;
+  gap: 0.6rem;
 }
 
 .instance-log-layout {
@@ -1231,7 +1309,7 @@ h2 {
 .instance-log-viewer-meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.75rem;
+  gap: 0.6rem;
   align-items: center;
 }
 
@@ -1256,7 +1334,7 @@ h2 {
 .instance-log-pagination {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.75rem;
+  gap: 0.6rem;
   align-items: center;
   justify-content: space-between;
 }
@@ -1317,6 +1395,6 @@ h2 {
 
   .instance-list-header,
   .instance-list-item {
-    grid-template-columns: minmax(10rem, 1.1fr) 7.5rem 8.5rem minmax(9rem, 1fr);
+    grid-template-columns: 12rem 5rem 5rem 5rem;
   }
 }

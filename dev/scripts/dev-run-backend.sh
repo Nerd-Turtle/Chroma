@@ -36,7 +36,7 @@ Commands:
   -start  Start the staged API and web UI. Build first if the runtime build is missing.
   -build  Stop, rebuild from src, restage into .runtime, and start.
   -stop   Stop the running compiled API and web UI.
-  -reset  Stop both processes and remove the .runtime SQLite database files.
+  -reset  Stop both processes and remove saved .runtime config, instance data, and logs.
 EOF
 }
 
@@ -331,12 +331,12 @@ reset_database() {
 
   rm -rf "${RUNTIME_DATA_DIR}"
   rm -rf "${RUNTIME_CONFIG_DIR}"
-  rm -f "${API_LOG_FILE}" "${WEB_LOG_FILE}"
+  rm -rf "${RUNTIME_LOG_DIR}"
 
   ensure_runtime_paths
   write_env_file
 
-  echo "Removed saved runtime state from ${RUNTIME_DATA_DIR} and ${RUNTIME_CONFIG_DIR}."
+  echo "Removed saved runtime state from ${RUNTIME_DATA_DIR}, ${RUNTIME_CONFIG_DIR}, and ${RUNTIME_LOG_DIR}."
 }
 
 main() {

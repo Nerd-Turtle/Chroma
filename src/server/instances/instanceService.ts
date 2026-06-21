@@ -89,6 +89,8 @@ export async function createInstance(
     updateCheckTime: input.updateCheckTime,
     updateCheckWeekday: input.updateCheckWeekday,
     instancePath: `${runtimePaths.dataDir}/instances/${id}`,
+    lastCheckAt: now,
+    lastCheckResult: "Success",
     createdAt: now,
     updatedAt: now,
   };

@@ -21,7 +21,7 @@ import {
   BdsStartupVerificationError,
 } from "./bdsRuntimeService.js";
 import { BdsStartValidationError } from "./bdsStartValidationService.js";
-import { runManualUpdateForInstance } from "../instances/instanceAutoUpdateService.js";
+import { runManualCheckForInstance, runManualUpdateForInstance } from "../instances/instanceAutoUpdateService.js";
 
 export async function registerBdsRoutes(app: FastifyInstance, db: Database) {
   app.get("/api/bds/latest", async (_request, reply) => {
@@ -30,6 +30,17 @@ export async function registerBdsRoutes(app: FastifyInstance, db: Database) {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       return reply.code(500).send({ error: message });
+    }
+  });
+
+  app.post("/api/instances/:instanceId/bds/check-updates", async (request, reply) => {
+    const params = request.params as { instanceId: string };
+
+    try {
+      return await runManualCheckForInstance(db, app.log, params.instanceId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return reply.code(message === "Instance not found" ? 404 : 400).send({ error: message });
     }
   });
 
