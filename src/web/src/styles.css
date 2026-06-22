@@ -159,6 +159,10 @@ body.is-resizing {
   margin: 0 auto;
 }
 
+.settings-panel {
+  max-width: 820px;
+}
+
 .hero-panel {
   margin-bottom: 1.25rem;
 }
@@ -201,6 +205,20 @@ h2 {
   display: grid;
   gap: 0.45rem;
   color: #d8deea;
+}
+
+.settings-provider-block {
+  display: grid;
+  gap: 0.85rem;
+  padding-top: 0.25rem;
+}
+
+.settings-provider-block h2 {
+  margin-bottom: 0.35rem;
+}
+
+.settings-inline-action {
+  justify-self: start;
 }
 
 .form-grid input,

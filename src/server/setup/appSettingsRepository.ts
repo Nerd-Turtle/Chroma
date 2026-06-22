@@ -23,3 +23,7 @@ export function upsertAppSetting(db: Database, key: string, value: string, updat
     updated_at: updatedAt,
   });
 }
+
+export function deleteAppSetting(db: Database, key: string): void {
+  db.prepare("DELETE FROM app_settings WHERE key = ?").run(key);
+}

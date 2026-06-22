@@ -21,6 +21,8 @@ export type { UserRole, UserRecord, AuthUser, SessionRecord, AppSettings } from 
 export type {
   SetupStatusResponse,
   SetupCompleteRequest,
+  AppSettingsResponse,
+  UpdateAppSettingsRequest,
   AuthSessionResponse,
   LoginRequest,
   LoginResponse,

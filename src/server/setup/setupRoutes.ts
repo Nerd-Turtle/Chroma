@@ -1,8 +1,8 @@
 import type { Database } from "better-sqlite3";
 import type { FastifyInstance } from "fastify";
-import type { SetupCompleteRequest, SetupStatusResponse } from "../../shared/types/index.js";
+import type { SetupCompleteRequest, SetupStatusResponse, UpdateAppSettingsRequest } from "../../shared/types/index.js";
 import { requireAuthenticated } from "../auth/authGuard.js";
-import { completeInitialSetup, getDashboardSummary, isSetupComplete } from "./setupService.js";
+import { completeInitialSetup, getAppSettings, getDashboardSummary, isSetupComplete, updateAppSettings } from "./setupService.js";
 
 export function registerSetupRoutes(app: FastifyInstance, db: Database): void {
   app.get("/api/setup/status", async (): Promise<SetupStatusResponse> => {
@@ -33,13 +33,26 @@ export function registerSetupRoutes(app: FastifyInstance, db: Database): void {
       return reply.code(400).send({ error: "language is required" });
     }
 
+    if (body.curseForgeApiKey !== undefined) {
+      if (typeof body.curseForgeApiKey !== "string") {
+        return reply.code(400).send({ error: "curseForgeApiKey must be a string" });
+      }
+
+      if (body.curseForgeApiKey.trim().length > 512) {
+        return reply.code(400).send({ error: "curseForgeApiKey must be 512 characters or fewer" });
+      }
+    }
+
     try {
-      await completeInitialSetup(db, {
+      const setupInput: SetupCompleteRequest = {
         username: body.username.trim(),
         password: body.password,
         timezone: body.timezone.trim(),
         language: body.language.trim(),
-      });
+        ...(body.curseForgeApiKey?.trim() ? { curseForgeApiKey: body.curseForgeApiKey.trim() } : {}),
+      };
+
+      await completeInitialSetup(db, setupInput);
       return { success: true };
     } catch (error) {
       const message = error instanceof Error ? error.message : "Setup failed";
@@ -51,5 +64,57 @@ export function registerSetupRoutes(app: FastifyInstance, db: Database): void {
     return {
       summary: getDashboardSummary(db),
     };
+  });
+
+  app.get("/api/app/settings", { preHandler: requireAuthenticated(db) }, async (_request, reply) => {
+    const settings = getAppSettings(db);
+
+    if (!settings) {
+      return reply.code(404).send({ error: "Application settings not found" });
+    }
+
+    return { settings };
+  });
+
+  app.put("/api/app/settings", { preHandler: requireAuthenticated(db) }, async (request, reply) => {
+    const body = request.body as Partial<UpdateAppSettingsRequest>;
+
+    if (typeof body.timezone !== "string" || body.timezone.trim() === "") {
+      return reply.code(400).send({ error: "timezone is required" });
+    }
+
+    if (typeof body.language !== "string" || body.language.trim() === "") {
+      return reply.code(400).send({ error: "language is required" });
+    }
+
+    if (body.curseForgeApiKey !== undefined) {
+      if (typeof body.curseForgeApiKey !== "string") {
+        return reply.code(400).send({ error: "curseForgeApiKey must be a string" });
+      }
+
+      if (body.curseForgeApiKey.trim().length > 512) {
+        return reply.code(400).send({ error: "curseForgeApiKey must be 512 characters or fewer" });
+      }
+    }
+
+    if (body.clearCurseForgeApiKey !== undefined && typeof body.clearCurseForgeApiKey !== "boolean") {
+      return reply.code(400).send({ error: "clearCurseForgeApiKey must be a boolean" });
+    }
+
+    try {
+      const settingsInput: UpdateAppSettingsRequest = {
+        timezone: body.timezone.trim(),
+        language: body.language.trim(),
+        ...(body.curseForgeApiKey?.trim() ? { curseForgeApiKey: body.curseForgeApiKey.trim() } : {}),
+        ...(body.clearCurseForgeApiKey !== undefined ? { clearCurseForgeApiKey: body.clearCurseForgeApiKey } : {}),
+      };
+
+      const settings = updateAppSettings(db, settingsInput);
+
+      return { settings };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to update application settings";
+      return reply.code(400).send({ error: message });
+    }
   });
 }

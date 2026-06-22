@@ -28,6 +28,18 @@ export type SetupCompleteRequest = {
   password: string;
   timezone: string;
   language: string;
+  curseForgeApiKey?: string;
+};
+
+export type AppSettingsResponse = {
+  settings: AppSettings;
+};
+
+export type UpdateAppSettingsRequest = {
+  timezone: string;
+  language: string;
+  curseForgeApiKey?: string;
+  clearCurseForgeApiKey?: boolean;
 };
 
 export type AuthSessionResponse =

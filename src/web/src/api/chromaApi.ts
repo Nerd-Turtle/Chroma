@@ -1,4 +1,5 @@
 import type {
+  AppSettingsResponse,
   AuthSessionResponse,
   BdsStartValidationResult,
   CreateInstanceRequest,
@@ -24,6 +25,7 @@ import type {
   LoginResponse,
   SetupCompleteRequest,
   SetupStatusResponse,
+  UpdateAppSettingsRequest,
   UpdateInstanceRequest,
   UpdateInstanceServerPropertiesRequest,
 } from "../../../shared/types/index.js";
@@ -98,6 +100,21 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
   const response = await fetch("/api/dashboard/summary");
   const result = await readJson<{ summary: DashboardSummary }>(response);
   return result.summary;
+}
+
+export async function getAppSettings(): Promise<AppSettingsResponse> {
+  const response = await fetch("/api/app/settings");
+  return readJson<AppSettingsResponse>(response);
+}
+
+export async function updateAppSettings(payload: UpdateAppSettingsRequest): Promise<AppSettingsResponse> {
+  const response = await fetch("/api/app/settings", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  return readJson<AppSettingsResponse>(response);
 }
 
 export async function getInstances(): Promise<InstanceListResponse> {

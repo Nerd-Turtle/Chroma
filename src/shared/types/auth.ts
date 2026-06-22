@@ -25,4 +25,6 @@ export type SessionRecord = {
 export type AppSettings = {
   timezone: string;
   language: string;
+  curseForgeApiKeyConfigured: boolean;
+  curseForgeApiKeyLastFour?: string;
 };

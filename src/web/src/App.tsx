@@ -6,20 +6,21 @@ import DashboardPage from "./pages/DashboardPage.js";
 import InstancesPage from "./pages/InstancesPage.js";
 import LoginPage from "./pages/LoginPage.js";
 import SetupPage from "./pages/SetupPage.js";
+import SettingsPage from "./pages/SettingsPage.js";
 
-type AppPage = "setup" | "login" | "dashboard" | "instances";
+type AppPage = "setup" | "login" | "dashboard" | "instances" | "settings";
 
-function getWorkspacePageFromHash(): "dashboard" | "instances" | null {
+function getWorkspacePageFromHash(): "dashboard" | "instances" | "settings" | null {
   const hash = window.location.hash.replace(/^#/, "");
 
-  if (hash === "dashboard" || hash === "instances") {
+  if (hash === "dashboard" || hash === "instances" || hash === "settings") {
     return hash;
   }
 
   return null;
 }
 
-function syncWorkspaceHash(page: "dashboard" | "instances"): void {
+function syncWorkspaceHash(page: "dashboard" | "instances" | "settings"): void {
   const nextHash = `#${page}`;
   if (window.location.hash !== nextHash) {
     window.location.hash = nextHash;
@@ -104,6 +105,7 @@ const App = () => {
         }} /> : null}
         {!loading && page === "dashboard" && user ? <DashboardPage user={user} /> : null}
         {!loading && page === "instances" && user ? <InstancesPage /> : null}
+        {!loading && page === "settings" && user ? <SettingsPage /> : null}
       </main>
     </div>
   );

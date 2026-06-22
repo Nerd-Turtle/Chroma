@@ -84,6 +84,16 @@ Do not hard-code repo-relative paths for runtime data.
 - Do not silently overwrite worlds, configs, addons, or backups.
 - Risky operations should require confirmation or create a backup first.
 
+## Provider Secret Rules
+
+- CurseForge API keys are secrets.
+- Do not commit, log, print, screenshot, or document real API keys.
+- During development, keep real provider keys only under `.runtime/` or another explicitly gitignored local secret store.
+- Do not duplicate provider keys into source files, docs, fixtures, tests, build output, release assets, or example config.
+- Do not ask for or use the real CurseForge API key unless live provider testing is explicitly required.
+- Prefer mocked, empty, or redacted provider credentials for normal coding, typechecking, builds, and UI work.
+- API responses and UI should expose only configured/not configured state and a redacted hint such as the last four characters.
+
 ## Manual Testing Model
 
 This project may use manual testing instead of automated tests.

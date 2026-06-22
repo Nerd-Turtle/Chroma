@@ -111,17 +111,21 @@ The BDS zip extraction service already has useful path traversal patterns that c
 
 ### 5. Keep provider secrets server-side
 
+CurseForge API access requires an approved CurseForge API key.
+
 CurseForge API keys must never be sent to React.
 
 The backend should call CurseForge and return only Chroma-shaped search results to the browser.
 
-Initial configuration should be environment-variable based:
+Normal configuration should be Web UI based:
 
-- `CURSEFORGE_API_KEY`: required to call the official CurseForge API.
-- `CURSEFORGE_BEDROCK_GAME_ID`: optional override if discovery is ambiguous.
-- `CURSEFORGE_BEDROCK_ADDONS_CLASS_ID`: optional override if category/class discovery is ambiguous.
+- Initial setup includes an optional CurseForge API key field.
+- Post-install Settings includes add, replace, and remove actions for the CurseForge API key.
+- The backend stores the key as a server-side application setting.
+- API responses expose only whether a key is configured and, at most, a short redacted hint such as the last four characters.
+- Logs, browser bundles, and provider status responses must never include the full key.
 
-If `CURSEFORGE_API_KEY` is missing, the Addons tab should still load and show that CurseForge browsing is not configured.
+If the key is missing, the Addons tab should still load and show that CurseForge browsing is not configured.
 
 ### 6. Do not hard-code CurseForge Bedrock IDs until verified
 
@@ -134,7 +138,7 @@ The provider service should prefer discovery:
 3. find the class/category for Addons
 4. cache the resolved IDs in memory
 
-The environment overrides above provide a fallback if discovery is unclear.
+If discovery is unclear, Chroma should add non-secret Settings fields for the resolved Bedrock game/class IDs rather than requiring normal users to edit environment files.
 
 ### 7. Search ranking starts simple
 
@@ -424,7 +428,8 @@ Important behavior from the current docs:
 
 Chroma provider behavior:
 
-- Backend reads `CURSEFORGE_API_KEY`.
+- Backend reads the CurseForge API key from server-side application settings.
+- Initial setup and post-install Settings are the supported user-facing configuration paths.
 - Backend returns a provider status object if the key is missing.
 - Backend maps Chroma sort labels to CurseForge sort fields.
 - Backend should use the provider download URL endpoint instead of scraping `curseforge.com`.
@@ -532,7 +537,7 @@ Add backend-only CurseForge integration for provider status and search.
 ### Scope
 
 - Add `curseForgeClient`.
-- Read `CURSEFORGE_API_KEY` only on the backend.
+- Read the CurseForge API key only on the backend from application settings.
 - Add provider status route.
 - Resolve or configure Bedrock game/class IDs.
 - Add search route.

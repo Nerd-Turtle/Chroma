@@ -13,6 +13,7 @@ const SetupPage = ({ onSetupComplete }: SetupPageProps) => {
   const [timezoneQuery, setTimezoneQuery] = useState("");
   const [showTimezoneOptions, setShowTimezoneOptions] = useState(false);
   const [language, setLanguage] = useState("");
+  const [curseForgeApiKey, setCurseForgeApiKey] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -64,6 +65,7 @@ const SetupPage = ({ onSetupComplete }: SetupPageProps) => {
         password,
         timezone: timezone.trim(),
         language: language.trim(),
+        ...(curseForgeApiKey.trim() ? { curseForgeApiKey: curseForgeApiKey.trim() } : {}),
       });
       onSetupComplete();
     } catch (setupError) {
@@ -148,6 +150,18 @@ const SetupPage = ({ onSetupComplete }: SetupPageProps) => {
               </div>
             ) : null}
           </div>
+        </label>
+
+        <label>
+          CurseForge API key
+          <input
+            type="password"
+            value={curseForgeApiKey}
+            onChange={(event) => setCurseForgeApiKey(event.target.value)}
+            maxLength={512}
+            autoComplete="off"
+            placeholder="Optional"
+          />
         </label>
 
         {error ? <div className="form-error">{error}</div> : null}
