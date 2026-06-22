@@ -831,6 +831,46 @@ Codify a repeatable validation model for Chroma-managed runtime behavior.
 - Every major runtime path has a documented expected result.
 - Regressions in runtime behavior can be reproduced consistently.
 
+### Implementation Notes
+
+- Added the Phase 10 manual validation document in:
+  - [docs/dev/chroma-runtime-validation-matrix.md](/home/turtle/chroma/docs/dev/chroma-runtime-validation-matrix.md)
+- The checklist is aligned to the existing `.runtime` development model and documents:
+  - shared environment/setup expectations
+  - expected outcomes for each major lifecycle and maintenance path
+  - cleanup steps so repeated validation runs stay consistent
+- Covered the runtime paths called out in this roadmap phase:
+  - normal start
+  - normal stop
+  - restart
+  - duplicate port conflict
+  - external port conflict
+  - crash on start
+  - Chroma restart reconciliation
+  - manual update
+  - automatic update
+  - backup while stopped
+  - backup during maintenance workflow
+  - console command flow
+  - log visibility
+
+### Validation Notes
+
+- Reviewed the checklist against the implemented runtime surfaces in the current branch/worktree:
+  - runtime lifecycle controls
+  - validation/conflict handling
+  - reconciliation behavior
+  - update flows
+  - backup export flow
+  - console stream
+  - log viewer
+- The matrix itself was added as the repeatable operator/developer validation artifact for future `.runtime` passes.
+- A fresh end-to-end rerun of every checklist item was not performed as part of this documentation-only phase completion update.
+
+### Status
+
+Completed on the current branch/worktree. Phase 10 now has a concrete `.runtime`-aligned validation matrix and cleanup guidance so runtime regressions can be re-tested consistently.
+
 ## Feature Enhancement: Runtime Broker Service
 
 ### Objective
