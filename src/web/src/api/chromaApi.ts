@@ -1,9 +1,17 @@
 import type {
   AppSettingsResponse,
   AuthSessionResponse,
+  AddonLibraryDownloadResponse,
+  AddonLibraryEditorResponse,
+  AddonLibraryListResponse,
+  AddonUpdateSettingsResponse,
   BdsStartValidationResult,
   CreateInstanceRequest,
   DashboardSummary,
+  CurseForgeAddonDownloadRequest,
+  CurseForgeAddonProviderStatusResponse,
+  CurseForgeAddonSearchRequest,
+  CurseForgeAddonSearchResponse,
   InstanceBdsCheckUpdatesResponse,
   InstanceBdsConsoleCommandRequest,
   InstanceBdsConsoleCommandResponse,
@@ -13,6 +21,8 @@ import type {
   InstanceBdsManualUpdateResponse,
   InstanceBdsStartBlockedResponse,
   InstanceBdsRuntimeResponse,
+  InstanceAddonDetailResponse,
+  InstanceAddonListResponse,
   InstanceBackupResponse,
   InstanceBdsStatusResponse,
   InstanceDetailResponse,
@@ -26,6 +36,9 @@ import type {
   SetupCompleteRequest,
   SetupStatusResponse,
   UpdateAppSettingsRequest,
+  UpdateAddonLibraryLinksRequest,
+  UpdateAddonUpdateSettingsRequest,
+  UpdateInstanceAddonOrderRequest,
   UpdateInstanceRequest,
   UpdateInstanceServerPropertiesRequest,
 } from "../../../shared/types/index.js";
@@ -43,7 +56,19 @@ export class ApiRequestError extends Error {
 }
 
 async function readJson<T>(response: Response): Promise<T> {
-  const body = (await response.json()) as T & Partial<InstanceBdsStartBlockedResponse> & { error?: string };
+  const text = await response.text();
+
+  if (text.trim() === "") {
+    throw new ApiRequestError("The server returned an empty response. The API may have restarted or crashed.", response.status);
+  }
+
+  let body: T & Partial<InstanceBdsStartBlockedResponse> & { error?: string };
+  try {
+    body = JSON.parse(text) as T & Partial<InstanceBdsStartBlockedResponse> & { error?: string };
+  } catch {
+    throw new ApiRequestError("The server returned a response that was not valid JSON.", response.status);
+  }
+
   if (!response.ok) {
     const validationMessage =
       body.validation && Array.isArray(body.validation.errors) && body.validation.errors.length > 0
@@ -132,6 +157,176 @@ export async function getInstanceRuntimeEvents(instanceId: string): Promise<Inst
   return readJson<InstanceRuntimeEventsResponse>(response);
 }
 
+export async function getInstanceAddons(instanceId: string): Promise<InstanceAddonListResponse> {
+  const response = await fetch(`/api/instances/${instanceId}/addons`);
+  return readJson<InstanceAddonListResponse>(response);
+}
+
+export async function getAddonLibrary(): Promise<AddonLibraryListResponse> {
+  const response = await fetch("/api/addons/library");
+  return readJson<AddonLibraryListResponse>(response);
+}
+
+export async function deleteAddonFromLibrary(addonFileId: string): Promise<{ success: true }> {
+  const response = await fetch(`/api/addons/library/${addonFileId}`, {
+    method: "DELETE",
+  });
+  return readJson<{ success: true }>(response);
+}
+
+export async function getAddonUpdateSettings(): Promise<AddonUpdateSettingsResponse> {
+  const response = await fetch("/api/addons/settings");
+  return readJson<AddonUpdateSettingsResponse>(response);
+}
+
+export async function updateAddonUpdateSettings(
+  payload: UpdateAddonUpdateSettingsRequest,
+): Promise<AddonUpdateSettingsResponse> {
+  const response = await fetch("/api/addons/settings", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return readJson<AddonUpdateSettingsResponse>(response);
+}
+
+export async function getAddonLibraryEditor(addonFileId: string): Promise<AddonLibraryEditorResponse> {
+  const response = await fetch(`/api/addons/library/${addonFileId}/editor`);
+  return readJson<AddonLibraryEditorResponse>(response);
+}
+
+export async function updateAddonLibraryLinks(
+  addonFileId: string,
+  payload: UpdateAddonLibraryLinksRequest,
+): Promise<AddonLibraryEditorResponse> {
+  const response = await fetch(`/api/addons/library/${addonFileId}/editor`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return readJson<AddonLibraryEditorResponse>(response);
+}
+
+export async function selectInstanceLibraryAddons(
+  instanceId: string,
+  addonFileIds: string[],
+): Promise<InstanceAddonListResponse> {
+  const response = await fetch(`/api/instances/${instanceId}/addons/library`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ addonFileIds }),
+  });
+  return readJson<InstanceAddonListResponse>(response);
+}
+
+export async function updateInstanceAddonOrder(
+  instanceId: string,
+  payload: UpdateInstanceAddonOrderRequest,
+): Promise<InstanceAddonListResponse> {
+  const response = await fetch(`/api/instances/${instanceId}/addons/order`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return readJson<InstanceAddonListResponse>(response);
+}
+
+export async function autoSortInstanceAddons(instanceId: string): Promise<InstanceAddonListResponse> {
+  const response = await fetch(`/api/instances/${instanceId}/addons/auto-sort`, {
+    method: "POST",
+  });
+  return readJson<InstanceAddonListResponse>(response);
+}
+
+export async function getInstanceAddonDetail(instanceId: string, addonId: string): Promise<InstanceAddonDetailResponse> {
+  const response = await fetch(`/api/instances/${instanceId}/addons/${addonId}`);
+  return readJson<InstanceAddonDetailResponse>(response);
+}
+
+export async function getCurseForgeAddonProviderStatus(
+  instanceId: string,
+): Promise<CurseForgeAddonProviderStatusResponse> {
+  const response = await fetch(`/api/instances/${instanceId}/addons/providers/curseforge/status`);
+  return readJson<CurseForgeAddonProviderStatusResponse>(response);
+}
+
+export async function getLibraryCurseForgeAddonProviderStatus(): Promise<CurseForgeAddonProviderStatusResponse> {
+  const response = await fetch("/api/addons/providers/curseforge/status");
+  return readJson<CurseForgeAddonProviderStatusResponse>(response);
+}
+
+export async function searchCurseForgeAddons(
+  instanceId: string,
+  payload: CurseForgeAddonSearchRequest,
+): Promise<CurseForgeAddonSearchResponse> {
+  const params = new URLSearchParams();
+  if (payload.q) params.set("q", payload.q);
+  if (payload.sort) params.set("sort", payload.sort);
+  if (payload.page) params.set("page", String(payload.page));
+  if (payload.pageSize) params.set("pageSize", String(payload.pageSize));
+  if (payload.gameVersion) params.set("gameVersion", payload.gameVersion);
+
+  const query = params.toString();
+  const response = await fetch(
+    `/api/instances/${instanceId}/addons/providers/curseforge/search${query ? `?${query}` : ""}`,
+  );
+  return readJson<CurseForgeAddonSearchResponse>(response);
+}
+
+export async function searchLibraryCurseForgeAddons(
+  payload: CurseForgeAddonSearchRequest,
+): Promise<CurseForgeAddonSearchResponse> {
+  const params = new URLSearchParams();
+  if (payload.q) params.set("q", payload.q);
+  if (payload.sort) params.set("sort", payload.sort);
+  if (payload.page) params.set("page", String(payload.page));
+  if (payload.pageSize) params.set("pageSize", String(payload.pageSize));
+  if (payload.gameVersion) params.set("gameVersion", payload.gameVersion);
+
+  const query = params.toString();
+  const response = await fetch(`/api/addons/providers/curseforge/search${query ? `?${query}` : ""}`);
+  return readJson<CurseForgeAddonSearchResponse>(response);
+}
+
+export async function downloadCurseForgeAddon(
+  instanceId: string,
+  payload: CurseForgeAddonDownloadRequest,
+): Promise<InstanceAddonDetailResponse> {
+  const response = await fetch(`/api/instances/${instanceId}/addons/providers/curseforge/download`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  return readJson<InstanceAddonDetailResponse>(response);
+}
+
+export async function downloadCurseForgeAddonToLibrary(
+  payload: CurseForgeAddonDownloadRequest,
+): Promise<AddonLibraryDownloadResponse> {
+  const response = await fetch("/api/addons/providers/curseforge/download", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  return readJson<AddonLibraryDownloadResponse>(response);
+}
+
+export async function enableInstanceAddon(instanceId: string, addonId: string): Promise<InstanceAddonDetailResponse> {
+  const response = await fetch(`/api/instances/${instanceId}/addons/${addonId}/enable`, {
+    method: "POST",
+  });
+  return readJson<InstanceAddonDetailResponse>(response);
+}
+
+export async function disableInstanceAddon(instanceId: string, addonId: string): Promise<InstanceAddonDetailResponse> {
+  const response = await fetch(`/api/instances/${instanceId}/addons/${addonId}/disable`, {
+    method: "POST",
+  });
+  return readJson<InstanceAddonDetailResponse>(response);
+}
+
 export async function createInstance(payload: CreateInstanceRequest): Promise<InstanceDetailResponse> {
   const response = await fetch("/api/instances", {
     method: "POST",
@@ -150,6 +345,14 @@ export async function updateInstance(instanceId: string, payload: UpdateInstance
   });
 
   return readJson<InstanceDetailResponse>(response);
+}
+
+export async function deleteInstance(instanceId: string): Promise<{ success: true }> {
+  const response = await fetch(`/api/instances/${instanceId}`, {
+    method: "DELETE",
+  });
+
+  return readJson<{ success: true }>(response);
 }
 
 export async function getInstanceSettings(instanceId: string): Promise<InstanceSettingsResponse> {

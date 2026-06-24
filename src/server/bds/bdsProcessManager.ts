@@ -21,6 +21,7 @@ const RECENT_LOG_TAIL_LIMIT = 12;
 const CONSOLE_SCROLLBACK_LIMIT = 300;
 
 type ConsoleListener = (event: { type: "line"; line: BdsConsoleLine } | { type: "status"; snapshot: BdsConsoleSnapshot }) => void;
+type RuntimeStateListener = (runtimeState: BdsRuntimeState, previousState?: BdsRuntimeState) => void;
 
 function buildRuntimeState(
   instanceId: string,
@@ -43,6 +44,7 @@ export class BdsProcessManager {
   private instances = new Map<string, Instance>();
   private consoleBuffers = new Map<string, BdsConsoleLine[]>();
   private consoleListeners = new Map<string, Set<ConsoleListener>>();
+  private runtimeStateListeners = new Set<RuntimeStateListener>();
   private currentLogSizes = new Map<string, number>();
   private logWriteChains = new Map<string, Promise<void>>();
 
@@ -99,8 +101,7 @@ export class BdsProcessManager {
     });
 
     this.processes.set(instance.id, child);
-    this.runtimeStates.set(instance.id, runtimeState);
-    this.emitConsoleStatus(instance.id);
+    this.setRuntimeState(instance.id, runtimeState);
     if (pid !== undefined) {
       await writeRuntimeHandle(instance, {
         instanceId: instance.id,
@@ -132,7 +133,7 @@ export class BdsProcessManager {
       const stoppedAt = new Date().toISOString();
       const status = code === 0 ? "stopped" : "error";
       const pid = child.pid;
-      this.runtimeStates.set(instance.id, buildRuntimeState(instance.id, {
+      this.setRuntimeState(instance.id, buildRuntimeState(instance.id, {
         status,
         desiredStatus: savedDesiredStatus(status),
         healthStatus: status === "stopped" ? "unknown" : "unhealthy",
@@ -151,14 +152,13 @@ export class BdsProcessManager {
       this.processes.delete(instance.id);
       this.logWriteChains.delete(instance.id);
       this.appendConsoleSystemLine(instance.id, status === "stopped" ? "Process exited cleanly." : "Process exited with error.");
-      this.emitConsoleStatus(instance.id);
       void removeRuntimeHandle(instance).catch(() => undefined);
     });
 
     child.on("error", (error) => {
       const message = error instanceof Error ? error.message : String(error);
       const pid = child.pid;
-      this.runtimeStates.set(instance.id, buildRuntimeState(instance.id, {
+      this.setRuntimeState(instance.id, buildRuntimeState(instance.id, {
         status: "error",
         desiredStatus: "running",
         healthStatus: "unhealthy",
@@ -172,7 +172,6 @@ export class BdsProcessManager {
       this.processes.delete(instance.id);
       this.logWriteChains.delete(instance.id);
       this.appendConsoleSystemLine(instance.id, "Failed to start Bedrock server process.");
-      this.emitConsoleStatus(instance.id);
       void removeRuntimeHandle(instance).catch(() => undefined);
     });
 
@@ -215,8 +214,7 @@ export class BdsProcessManager {
       ...(saved?.startedAt ? { startedAt: saved.startedAt } : {}),
     });
 
-    this.runtimeStates.set(instanceId, runtimeState);
-    this.emitConsoleStatus(instanceId);
+    this.setRuntimeState(instanceId, runtimeState);
 
     const stopPromise = new Promise<BdsRuntimeState>((resolve) => {
       let cleanedUp = false;
@@ -238,11 +236,10 @@ export class BdsProcessManager {
         cleanedUp = true;
         cleanup();
         this.processes.delete(instanceId);
-        this.runtimeStates.set(instanceId, state);
+        this.setRuntimeState(instanceId, state);
         if (instance) {
           void removeRuntimeHandle(instance).catch(() => undefined);
         }
-        this.emitConsoleStatus(instanceId);
         resolve(state);
       };
 
@@ -374,8 +371,7 @@ export class BdsProcessManager {
         "Rediscovered an existing BDS process after Chroma restart. Monitoring has resumed, but live command streaming requires a fresh managed restart.",
     });
 
-    this.runtimeStates.set(instance.id, nextState);
-    this.emitConsoleStatus(instance.id);
+    this.setRuntimeState(instance.id, nextState);
     return nextState;
   }
 
@@ -397,6 +393,10 @@ export class BdsProcessManager {
       desiredStatus: "stopped",
       healthStatus: "unknown",
     });
+  }
+
+  hasRuntimeState(instanceId: string): boolean {
+    return this.runtimeStates.has(instanceId);
   }
 
   sendCommand(instanceId: string, command: string): boolean {
@@ -439,6 +439,14 @@ export class BdsProcessManager {
     };
   }
 
+  subscribeToRuntimeState(listener: RuntimeStateListener): () => void {
+    this.runtimeStateListeners.add(listener);
+
+    return () => {
+      this.runtimeStateListeners.delete(listener);
+    };
+  }
+
   async stopAll(): Promise<void> {
     const stopTargets = new Set<string>([
       ...this.processes.keys(),
@@ -472,8 +480,7 @@ export class BdsProcessManager {
       ...(message ? { message } : current.message ? { message: current.message } : {}),
     });
 
-    this.runtimeStates.set(instanceId, nextState);
-    this.emitConsoleStatus(instanceId);
+    this.setRuntimeState(instanceId, nextState);
     return nextState;
   }
 
@@ -495,7 +502,7 @@ export class BdsProcessManager {
       message: "Stopping rediscovered process without a live stdin channel.",
     });
 
-    this.runtimeStates.set(instanceId, stoppingState);
+    this.setRuntimeState(instanceId, stoppingState);
 
     try {
       process.kill(pid, "SIGTERM");
@@ -515,8 +522,7 @@ export class BdsProcessManager {
         stoppedAt: new Date().toISOString(),
         message: "Rediscovered process could not be signaled during stop.",
       });
-      this.runtimeStates.set(instanceId, state);
-      this.emitConsoleStatus(instanceId);
+      this.setRuntimeState(instanceId, state);
       return state;
     }
 
@@ -539,8 +545,7 @@ export class BdsProcessManager {
           stoppedAt: new Date().toISOString(),
           message: "Rediscovered process stopped after reconciliation.",
         });
-        this.runtimeStates.set(instanceId, state);
-        this.emitConsoleStatus(instanceId);
+        this.setRuntimeState(instanceId, state);
         return state;
       }
 
@@ -568,8 +573,7 @@ export class BdsProcessManager {
       stoppedAt: new Date().toISOString(),
       message: "Rediscovered process required forced termination during stop.",
     });
-    this.runtimeStates.set(instanceId, state);
-    this.emitConsoleStatus(instanceId);
+    this.setRuntimeState(instanceId, state);
     return state;
   }
 
@@ -657,8 +661,7 @@ export class BdsProcessManager {
               : "Process survived the startup verification window but did not produce recent runtime output.",
         });
 
-        this.runtimeStates.set(instanceId, nextState);
-        this.emitConsoleStatus(instanceId);
+        this.setRuntimeState(instanceId, nextState);
         finish(nextState);
       }, START_VERIFICATION_WINDOW_MS);
 
@@ -726,6 +729,20 @@ export class BdsProcessManager {
       type: "status",
       snapshot: this.getConsoleSnapshot(instanceId),
     });
+  }
+
+  private setRuntimeState(instanceId: string, nextState: BdsRuntimeState): void {
+    const previousState = this.runtimeStates.get(instanceId);
+    this.runtimeStates.set(instanceId, nextState);
+    this.emitConsoleStatus(instanceId);
+
+    for (const listener of this.runtimeStateListeners) {
+      try {
+        listener(nextState, previousState);
+      } catch {
+        // Ignore listener errors so runtime state propagation never interrupts process management.
+      }
+    }
   }
 
   private notifyConsoleListeners(

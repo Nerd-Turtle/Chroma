@@ -2,14 +2,16 @@ import type { Database } from "better-sqlite3";
 import type { Instance } from "../../shared/types/index.js";
 import { getRuntimePaths } from "../config/paths.js";
 import { createId } from "../utils/createId.js";
-import { createInstanceDirectories } from "./instanceFilesystem.js";
+import { createInstanceDirectories, deleteInstanceDirectory } from "./instanceFilesystem.js";
 import {
+  deleteInstanceById,
   getInstance as getInstanceFromDb,
   listInstances as listInstancesFromDb,
   saveInstance as saveInstanceToDb,
 } from "./instanceRepository.js";
 import { createDefaultSettingsForInstance } from "./instanceSettingsService.js";
 import { installBdsForInstance } from "../bds/bdsInstallService.js";
+import { getBdsRuntimeState } from "../bds/bdsRuntimeService.js";
 import { appendInstanceRuntimeEvent } from "./instanceRuntimeEventService.js";
 
 export type CreateInstanceInput = {
@@ -35,6 +37,22 @@ export function listInstances(db: Database): Instance[] {
 
 export function getInstance(db: Database, instanceId: string): Instance | undefined {
   return getInstanceFromDb(db, instanceId);
+}
+
+export async function deleteInstance(db: Database, instanceId: string): Promise<void> {
+  const instance = getInstanceFromDb(db, instanceId);
+
+  if (!instance) {
+    throw new Error("Instance not found");
+  }
+
+  const runtime = await getBdsRuntimeState(db, instanceId);
+  if (runtime.isProcessActive || runtime.status === "running" || runtime.status === "starting" || runtime.status === "stopping") {
+    throw new Error("Stop the instance before deleting it.");
+  }
+
+  deleteInstanceById(db, instanceId);
+  await deleteInstanceDirectory(instance);
 }
 
 export function updateInstance(

@@ -2,25 +2,26 @@ import { useEffect, useState } from "react";
 import type { AuthUser } from "../../shared/types/index.js";
 import { getSession, getSetupStatus, logout } from "./api/chromaApi.js";
 import TopNav from "./components/TopNav.js";
+import AddonLibraryPage from "./pages/AddonLibraryPage.js";
 import DashboardPage from "./pages/DashboardPage.js";
 import InstancesPage from "./pages/InstancesPage.js";
 import LoginPage from "./pages/LoginPage.js";
 import SetupPage from "./pages/SetupPage.js";
 import SettingsPage from "./pages/SettingsPage.js";
 
-type AppPage = "setup" | "login" | "dashboard" | "instances" | "settings";
+type AppPage = "setup" | "login" | "dashboard" | "instances" | "addon-library" | "settings";
 
-function getWorkspacePageFromHash(): "dashboard" | "instances" | "settings" | null {
+function getWorkspacePageFromHash(): "dashboard" | "instances" | "addon-library" | "settings" | null {
   const hash = window.location.hash.replace(/^#/, "");
 
-  if (hash === "dashboard" || hash === "instances" || hash === "settings") {
+  if (hash === "dashboard" || hash === "instances" || hash === "addon-library" || hash === "settings") {
     return hash;
   }
 
   return null;
 }
 
-function syncWorkspaceHash(page: "dashboard" | "instances" | "settings"): void {
+function syncWorkspaceHash(page: "dashboard" | "instances" | "addon-library" | "settings"): void {
   const nextHash = `#${page}`;
   if (window.location.hash !== nextHash) {
     window.location.hash = nextHash;
@@ -95,7 +96,15 @@ const App = () => {
         }}
       />
 
-      <main className={page === "instances" ? "page-frame page-frame-workspace" : "page-frame"}>
+      <main
+        className={
+          page === "instances"
+            ? "page-frame page-frame-workspace"
+            : page === "addon-library"
+              ? "page-frame page-frame-addon-library"
+              : "page-frame"
+        }
+      >
         {loading ? <section className="page-panel">Loading Chroma...</section> : null}
         {!loading && page === "setup" ? <SetupPage onSetupComplete={() => setPage("login")} /> : null}
         {!loading && page === "login" ? <LoginPage onLoginSuccess={(nextUser: AuthUser) => {
@@ -103,8 +112,9 @@ const App = () => {
           setPage("dashboard");
           syncWorkspaceHash("dashboard");
         }} /> : null}
-        {!loading && page === "dashboard" && user ? <DashboardPage user={user} /> : null}
+        {!loading && page === "dashboard" && user ? <DashboardPage /> : null}
         {!loading && page === "instances" && user ? <InstancesPage /> : null}
+        {!loading && page === "addon-library" && user ? <AddonLibraryPage /> : null}
         {!loading && page === "settings" && user ? <SettingsPage /> : null}
       </main>
     </div>

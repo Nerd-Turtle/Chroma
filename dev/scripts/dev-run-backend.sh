@@ -46,6 +46,8 @@ require_tools() {
   command -v node >/dev/null 2>&1 || missing+=("node")
   command -v pnpm >/dev/null 2>&1 || missing+=("pnpm")
   command -v curl >/dev/null 2>&1 || missing+=("curl")
+  command -v ps >/dev/null 2>&1 || missing+=("ps")
+  command -v ss >/dev/null 2>&1 || missing+=("ss")
   command -v setsid >/dev/null 2>&1 || missing+=("setsid")
   command -v cp >/dev/null 2>&1 || missing+=("cp")
   command -v ln >/dev/null 2>&1 || missing+=("ln")
@@ -144,6 +146,87 @@ read_pid() {
   fi
 }
 
+read_cmdline() {
+  local pid="$1"
+
+  if [[ -r "/proc/${pid}/cmdline" ]]; then
+    tr '\0' ' ' <"/proc/${pid}/cmdline"
+  fi
+}
+
+find_listening_pid() {
+  local port="$1"
+  local pid
+
+  pid="$(
+    ss -ltnp "( sport = :${port} )" 2>/dev/null \
+      | awk 'match($0, /pid=[0-9]+/) { print substr($0, RSTART + 4, RLENGTH - 4); exit }'
+  )"
+
+  if [[ -n "${pid}" ]]; then
+    printf '%s\n' "${pid}"
+  fi
+}
+
+is_managed_api_pid() {
+  local pid="$1"
+  local cmdline
+  cmdline="$(read_cmdline "${pid}")"
+
+  [[ "${cmdline}" == *".runtime/opt/chroma/dist/server/index.js"* ]] || [[ "${cmdline}" == *"${RUNTIME_APP_DIR}/dist/server/index.js"* ]]
+}
+
+is_managed_web_pid() {
+  local pid="$1"
+  local cmdline
+  cmdline="$(read_cmdline "${pid}")"
+
+  [[ "${cmdline}" == *"vite preview src/web"* ]]
+}
+
+discover_managed_pid() {
+  local label="$1"
+  local pid_file="$2"
+  local port=""
+  local discovered_pid=""
+
+  cleanup_stale_pid "${pid_file}"
+
+  discovered_pid="$(read_pid "${pid_file}")"
+  if [[ -n "${discovered_pid}" ]]; then
+    printf '%s\n' "${discovered_pid}"
+    return
+  fi
+
+  case "${label}" in
+    api)
+      port="${API_PORT}"
+      ;;
+    "web ui")
+      port="${WEB_PORT}"
+      ;;
+    *)
+      return
+      ;;
+  esac
+
+  discovered_pid="$(find_listening_pid "${port}")"
+  if [[ -z "${discovered_pid}" ]]; then
+    return
+  fi
+
+  if [[ "${label}" == "api" ]] && is_managed_api_pid "${discovered_pid}"; then
+    printf '%s\n' "${discovered_pid}" >"${pid_file}"
+    printf '%s\n' "${discovered_pid}"
+    return
+  fi
+
+  if [[ "${label}" == "web ui" ]] && is_managed_web_pid "${discovered_pid}"; then
+    printf '%s\n' "${discovered_pid}" >"${pid_file}"
+    printf '%s\n' "${discovered_pid}"
+  fi
+}
+
 cleanup_stale_pid() {
   local pid_file="$1"
   local pid
@@ -163,10 +246,8 @@ stop_process() {
   local label="$1"
   local pid_file="$2"
 
-  cleanup_stale_pid "${pid_file}"
-
   local pid
-  pid="$(read_pid "${pid_file}")"
+  pid="$(discover_managed_pid "${label}" "${pid_file}")"
 
   if [[ -z "${pid}" ]]; then
     echo "No dev-built ${label} is running."
@@ -190,6 +271,27 @@ stop_process() {
   kill -9 "${pid}" 2>/dev/null || true
   rm -f "${pid_file}"
   echo "${label^} stopped."
+}
+
+report_port_conflict() {
+  local label="$1"
+  local host="$2"
+  local port="$3"
+  local pid
+  local cmdline
+
+  pid="$(find_listening_pid "${port}")"
+  if [[ -z "${pid}" ]]; then
+    return
+  fi
+
+  cmdline="$(read_cmdline "${pid}")"
+  echo "Cannot start dev-built ${label}: ${host}:${port} is already in use by PID ${pid}."
+  if [[ -n "${cmdline}" ]]; then
+    echo "Process: ${cmdline}"
+  fi
+  echo "Run ./dev/scripts/dev-run-backend.sh -stop if this is Chroma, or stop the conflicting process manually."
+  exit 1
 }
 
 wait_for_api_health() {
@@ -267,13 +369,15 @@ wait_for_web_health() {
 }
 
 start_api() {
-  cleanup_stale_pid "${API_PID_FILE}"
-
   local pid
-  pid="$(read_pid "${API_PID_FILE}")"
+  pid="$(discover_managed_pid "api" "${API_PID_FILE}")"
   if [[ -n "${pid}" ]]; then
     echo "Dev-built api is already running with PID ${pid}."
     return
+  fi
+
+  if [[ -n "$(find_listening_pid "${API_PORT}")" ]]; then
+    report_port_conflict "api" "${API_HOST}" "${API_PORT}"
   fi
 
   : >"${API_LOG_FILE}"
@@ -300,13 +404,15 @@ start_api() {
 }
 
 start_web() {
-  cleanup_stale_pid "${WEB_PID_FILE}"
-
   local pid
-  pid="$(read_pid "${WEB_PID_FILE}")"
+  pid="$(discover_managed_pid "web ui" "${WEB_PID_FILE}")"
   if [[ -n "${pid}" ]]; then
     echo "Dev-built web ui is already running with PID ${pid}."
     return
+  fi
+
+  if [[ -n "$(find_listening_pid "${WEB_PORT}")" ]]; then
+    report_port_conflict "web ui" "${WEB_HOST}" "${WEB_PORT}"
   fi
 
   : >"${WEB_LOG_FILE}"

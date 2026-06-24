@@ -2,7 +2,8 @@ import type { Database } from "better-sqlite3";
 import type { FastifyInstance } from "fastify";
 import type { SetupCompleteRequest, SetupStatusResponse, UpdateAppSettingsRequest } from "../../shared/types/index.js";
 import { requireAuthenticated } from "../auth/authGuard.js";
-import { completeInitialSetup, getAppSettings, getDashboardSummary, isSetupComplete, updateAppSettings } from "./setupService.js";
+import { getDashboardSummary } from "../dashboard/dashboardService.js";
+import { completeInitialSetup, getAppSettings, isSetupComplete, updateAppSettings } from "./setupService.js";
 
 export function registerSetupRoutes(app: FastifyInstance, db: Database): void {
   app.get("/api/setup/status", async (): Promise<SetupStatusResponse> => {
@@ -62,7 +63,7 @@ export function registerSetupRoutes(app: FastifyInstance, db: Database): void {
 
   app.get("/api/dashboard/summary", { preHandler: requireAuthenticated(db) }, async () => {
     return {
-      summary: getDashboardSummary(db),
+      summary: await getDashboardSummary(db),
     };
   });
 
@@ -87,6 +88,15 @@ export function registerSetupRoutes(app: FastifyInstance, db: Database): void {
       return reply.code(400).send({ error: "language is required" });
     }
 
+    if (
+      typeof body.notificationDurationSeconds !== "number" ||
+      !Number.isInteger(body.notificationDurationSeconds) ||
+      body.notificationDurationSeconds < 1 ||
+      body.notificationDurationSeconds > 30
+    ) {
+      return reply.code(400).send({ error: "notificationDurationSeconds must be an integer between 1 and 30" });
+    }
+
     if (body.curseForgeApiKey !== undefined) {
       if (typeof body.curseForgeApiKey !== "string") {
         return reply.code(400).send({ error: "curseForgeApiKey must be a string" });
@@ -105,6 +115,7 @@ export function registerSetupRoutes(app: FastifyInstance, db: Database): void {
       const settingsInput: UpdateAppSettingsRequest = {
         timezone: body.timezone.trim(),
         language: body.language.trim(),
+        notificationDurationSeconds: body.notificationDurationSeconds,
         ...(body.curseForgeApiKey?.trim() ? { curseForgeApiKey: body.curseForgeApiKey.trim() } : {}),
         ...(body.clearCurseForgeApiKey !== undefined ? { clearCurseForgeApiKey: body.clearCurseForgeApiKey } : {}),
       };

@@ -1,8 +1,19 @@
 import type { AppSettings, AuthUser } from "./auth.js";
 import type { BdsConsoleSnapshot } from "./bdsConsole.js";
 import type { BdsInstall } from "./bds.js";
-import type { BdsRuntimeState } from "./bdsRuntime.js";
-import type { Instance, InstanceUpdateCheckFrequency, InstanceUpdateCheckWeekday } from "./instance.js";
+import type { BdsRuntimeHealthStatus, BdsRuntimeState, BdsRuntimeStatus } from "./bdsRuntime.js";
+import type {
+  AddonLibraryLinkedInstance,
+  CurseForgeAddonProviderStatus,
+  CurseForgeAddonSearchPagination,
+  CurseForgeAddonSearchResult,
+  CurseForgeAddonSearchSort,
+  AddonLibraryItem,
+  AddonUpdateSettings,
+  InstanceAddon,
+  InstanceAddonPack,
+} from "./addon.js";
+import type { Instance, InstanceStatus, InstanceUpdateCheckFrequency, InstanceUpdateCheckWeekday } from "./instance.js";
 import type { InstanceRuntimeEvent } from "./runtimeEvent.js";
 import type { BedrockServerSettings } from "./serverSettings.js";
 
@@ -38,6 +49,7 @@ export type AppSettingsResponse = {
 export type UpdateAppSettingsRequest = {
   timezone: string;
   language: string;
+  notificationDurationSeconds: number;
   curseForgeApiKey?: string;
   clearCurseForgeApiKey?: boolean;
 };
@@ -61,10 +73,48 @@ export type LoginResponse = {
   user: AuthUser;
 };
 
+export type DashboardInstanceHealthCategory = "healthy" | "error" | "stopped";
+
+export type DashboardSystemPerformance = {
+  cpuUsagePercent: number;
+  ramUsageBytes: number;
+  ramTotalBytes: number;
+  ramUsagePercent: number;
+};
+
+export type DashboardInstancePerformance = {
+  instanceId: string;
+  friendlyName: string;
+  status: InstanceStatus;
+  healthCategory: DashboardInstanceHealthCategory;
+  runtimeStatus: BdsRuntimeStatus;
+  runtimeHealthStatus: BdsRuntimeHealthStatus;
+  isProcessActive: boolean;
+  pid?: number;
+  cpuUsagePercent?: number;
+  ramUsageBytes?: number;
+};
+
+export type DashboardHealthSegment = {
+  instanceId: string;
+  friendlyName: string;
+  healthCategory: DashboardInstanceHealthCategory;
+};
+
+export type DashboardHealthSummary = {
+  healthyCount: number;
+  errorCount: number;
+  stoppedCount: number;
+  segments: DashboardHealthSegment[];
+};
+
 export type DashboardSummary = {
   instanceCount: number;
   runningInstanceCount: number;
   stoppedInstanceCount: number;
+  systemPerformance: DashboardSystemPerformance;
+  instancePerformance: DashboardInstancePerformance[];
+  instanceHealth: DashboardHealthSummary;
   appSettings?: AppSettings;
 };
 
@@ -95,6 +145,68 @@ export type InstanceDetailResponse = {
 
 export type InstanceRuntimeEventsResponse = {
   events: InstanceRuntimeEvent[];
+};
+
+export type InstanceAddonListResponse = {
+  addons: InstanceAddon[];
+};
+
+export type UpdateInstanceAddonOrderRequest = {
+  addonIds: string[];
+};
+
+export type AddonLibraryListResponse = {
+  addons: AddonLibraryItem[];
+};
+
+export type AddonLibraryDownloadResponse = {
+  addon: AddonLibraryItem;
+};
+
+export type AddonUpdateSettingsResponse = {
+  settings: AddonUpdateSettings;
+};
+
+export type UpdateAddonUpdateSettingsRequest = AddonUpdateSettings;
+
+export type UpdateAddonLibraryLinksRequest = {
+  links: Array<{
+    instanceId: string;
+    autoUpdateEnabled: boolean;
+  }>;
+};
+
+export type AddonLibraryEditorResponse = {
+  addon: AddonLibraryItem;
+  instances: AddonLibraryLinkedInstance[];
+};
+
+export type InstanceAddonDetailResponse = {
+  addon: InstanceAddon;
+  packs: InstanceAddonPack[];
+};
+
+export type CurseForgeAddonProviderStatusResponse = {
+  provider: CurseForgeAddonProviderStatus;
+};
+
+export type CurseForgeAddonSearchResponse = {
+  provider: CurseForgeAddonProviderStatus;
+  results: CurseForgeAddonSearchResult[];
+  pagination: CurseForgeAddonSearchPagination;
+};
+
+export type CurseForgeAddonSearchRequest = {
+  q?: string;
+  sort?: CurseForgeAddonSearchSort;
+  page?: number;
+  pageSize?: number;
+  gameVersion?: string;
+};
+
+export type CurseForgeAddonDownloadRequest = {
+  projectId: number;
+  fileId: number;
 };
 
 export type InstanceSettingsResponse = {

@@ -359,7 +359,11 @@ async function runAutoUpdateCycle(db: Database, logger: FastifyBaseLogger): Prom
       continue;
     }
 
-    await performAutoUpdateForInstance(db, logger, instance, checkedAt);
+    try {
+      await performAutoUpdateForInstance(db, logger, instance, checkedAt);
+    } catch (error) {
+      logger.error({ instanceId: instance.id, error }, "Automatic BDS update failed");
+    }
   }
 }
 
@@ -368,9 +372,13 @@ export function startInstanceAutoUpdateScheduler(db: Database, logger: FastifyBa
     return;
   }
 
-  void runAutoUpdateCycle(db, logger);
+  void runAutoUpdateCycle(db, logger).catch((error) => {
+    logger.error({ error }, "Automatic BDS update cycle failed");
+  });
 
   schedulerTimer = setInterval(() => {
-    void runAutoUpdateCycle(db, logger);
+    void runAutoUpdateCycle(db, logger).catch((error) => {
+      logger.error({ error }, "Automatic BDS update cycle failed");
+    });
   }, AUTO_UPDATE_INTERVAL_MS);
 }

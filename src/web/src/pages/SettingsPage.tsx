@@ -16,6 +16,7 @@ const SettingsPage = () => {
   const [timezoneQuery, setTimezoneQuery] = useState("");
   const [showTimezoneOptions, setShowTimezoneOptions] = useState(false);
   const [language, setLanguage] = useState("");
+  const [notificationDurationSeconds, setNotificationDurationSeconds] = useState("2");
   const [curseForgeApiKey, setCurseForgeApiKey] = useState("");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -43,6 +44,7 @@ const SettingsPage = () => {
         setTimezone(result.settings.timezone);
         setTimezoneQuery(result.settings.timezone);
         setLanguage(result.settings.language);
+        setNotificationDurationSeconds(String(result.settings.notificationDurationSeconds));
       } catch (settingsError) {
         setError(settingsError instanceof Error ? settingsError.message : "Unable to load settings");
       } finally {
@@ -52,6 +54,22 @@ const SettingsPage = () => {
 
     void loadSettings();
   }, []);
+
+  useEffect(() => {
+    if (!success) {
+      return;
+    }
+
+    const parsedSeconds = Number.parseInt(notificationDurationSeconds, 10);
+    const durationMs = Number.isInteger(parsedSeconds) && parsedSeconds >= 1 ? parsedSeconds * 1000 : 2000;
+    const timeoutId = window.setTimeout(() => {
+      setSuccess("");
+    }, durationMs);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [success, notificationDurationSeconds]);
 
   async function saveSettings(payload: UpdateAppSettingsRequest, message: string): Promise<void> {
     setSaving(true);
@@ -64,6 +82,7 @@ const SettingsPage = () => {
       setTimezone(result.settings.timezone);
       setTimezoneQuery(result.settings.timezone);
       setLanguage(result.settings.language);
+      setNotificationDurationSeconds(String(result.settings.notificationDurationSeconds));
       setCurseForgeApiKey("");
       setSuccess(message);
     } catch (settingsError) {
@@ -84,6 +103,7 @@ const SettingsPage = () => {
     const payload: UpdateAppSettingsRequest = {
       timezone: timezone.trim(),
       language: language.trim(),
+      notificationDurationSeconds: Number.parseInt(notificationDurationSeconds, 10),
       ...(curseForgeApiKey.trim() ? { curseForgeApiKey: curseForgeApiKey.trim() } : {}),
     };
 
@@ -99,6 +119,7 @@ const SettingsPage = () => {
       {
         timezone: timezone.trim(),
         language: language.trim(),
+        notificationDurationSeconds: Number.parseInt(notificationDurationSeconds, 10),
         clearCurseForgeApiKey: true,
       },
       "CurseForge API key removed.",
@@ -177,6 +198,18 @@ const SettingsPage = () => {
             <label>
               Language
               <input value={language} onChange={(event) => setLanguage(event.target.value)} />
+            </label>
+
+            <label>
+              Notification duration seconds
+              <input
+                type="number"
+                min={1}
+                max={30}
+                step={1}
+                value={notificationDurationSeconds}
+                onChange={(event) => setNotificationDurationSeconds(event.target.value)}
+              />
             </label>
 
             <div className="settings-provider-block">

@@ -1,5 +1,5 @@
-import { ArrowDownToLine, LoaderCircle, Play, RotateCw, Save, Square, SquarePen, Terminal } from "lucide-react";
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { ArrowDownToLine, GripVertical, LoaderCircle, Play, RotateCw, Save, Square, SquarePen, Terminal, Trash2, X } from "lucide-react";
+import { useEffect, useRef, useState, type DragEvent, type FormEvent, type ReactNode } from "react";
 import type {
   BdsStartValidationResult,
   BdsConsoleLine,
@@ -7,6 +7,7 @@ import type {
   BdsRuntimeState,
   BedrockServerSettings,
   Instance,
+  InstanceAddon,
   InstanceBdsLogFileSummary,
   InstanceRuntimeEvent,
 } from "../../../shared/types/index.js";
@@ -14,7 +15,12 @@ import {
   ApiRequestError,
   createInstance,
   createExportBackup,
+  autoSortInstanceAddons,
+  deleteInstance,
+  disableInstanceAddon,
+  enableInstanceAddon,
   getInstance,
+  getInstanceAddons,
   getInstanceBdsLogFiles,
   getInstanceBdsLogPage,
   getInstanceBdsRuntime,
@@ -32,8 +38,10 @@ import {
   startInstanceBds,
   stopInstanceBds,
   updateInstance,
+  updateInstanceAddonOrder,
   updateInstanceServerProperties,
 } from "../api/chromaApi.js";
+import { useNotificationDurationMs } from "../components/useNotificationDurationMs.js";
 
 type InstanceWorkspaceData = {
   instance: Instance;
@@ -41,6 +49,7 @@ type InstanceWorkspaceData = {
   bds: BdsInstall;
   runtime: BdsRuntimeState;
   events: InstanceRuntimeEvent[];
+  addons: InstanceAddon[];
 };
 
 type RightPaneMode = "details" | "create";
@@ -94,6 +103,8 @@ type WorkspaceNotice = {
   message: string;
 };
 
+type AddonDropPlacement = "before" | "after";
+
 function formatLabel(value: string): string {
   return value
     .replace(/[_-]+/g, " ")
@@ -127,6 +138,10 @@ function formatBytes(value: number): string {
   return `${(value / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function formatNumber(value: number): string {
+  return new Intl.NumberFormat().format(value);
+}
+
 function formatEventAction(value: string): string {
   return formatLabel(value);
 }
@@ -155,6 +170,54 @@ function getEventToneClass(level: InstanceRuntimeEvent["level"]): string {
   }
 
   return "status-info";
+}
+
+function getAddonStatusToneClass(status: InstanceAddon["status"]): string {
+  if (status === "error") {
+    return "status-error";
+  }
+
+  if (status === "enabled") {
+    return "status-current";
+  }
+
+  return "status-stopped";
+}
+
+function getAddonPackSummary(addon: InstanceAddon): string {
+  const parts = [
+    addon.packCounts.behavior > 0 ? `${addon.packCounts.behavior} behavior` : "",
+    addon.packCounts.resource > 0 ? `${addon.packCounts.resource} resource` : "",
+    addon.packCounts.skin > 0 ? `${addon.packCounts.skin} skin pack` : "",
+    addon.packCounts.unknown > 0 ? `${addon.packCounts.unknown} unknown` : "",
+    addon.packCounts.unsupported > 0 ? `${addon.packCounts.unsupported} unsupported` : "",
+  ].filter((part) => part !== "");
+
+  return parts.length > 0 ? parts.join(", ") : "No packs discovered";
+}
+
+function moveAddonId(
+  addonIds: string[],
+  draggedAddonId: string,
+  targetAddonId: string,
+  placement: AddonDropPlacement,
+): string[] {
+  if (draggedAddonId === targetAddonId) {
+    return addonIds;
+  }
+
+  const nextOrder = [...addonIds];
+  const draggedIndex = nextOrder.indexOf(draggedAddonId);
+  const targetIndex = nextOrder.indexOf(targetAddonId);
+  if (draggedIndex === -1 || targetIndex === -1) {
+    return addonIds;
+  }
+
+  nextOrder.splice(draggedIndex, 1);
+  const adjustedTargetIndex = nextOrder.indexOf(targetAddonId);
+  const insertionIndex = placement === "after" ? adjustedTargetIndex + 1 : adjustedTargetIndex;
+  nextOrder.splice(insertionIndex, 0, draggedAddonId);
+  return nextOrder;
 }
 
 function parseServerPropertiesPreview(content: string): Array<{ key: string; value: string }> {
@@ -262,6 +325,30 @@ function getRuntimeStatusSummary(runtime: BdsRuntimeState): string {
   return formatLabel(runtime.status);
 }
 
+function mapRuntimeStateToInstanceStatus(runtime: BdsRuntimeState): Instance["status"] {
+  if (runtime.maintenanceStatus === "update") {
+    return "updating";
+  }
+
+  if (runtime.maintenanceStatus === "backup") {
+    return "backing_up";
+  }
+
+  if (runtime.maintenanceStatus === "restore") {
+    return "restoring";
+  }
+
+  if (runtime.status === "unknown") {
+    return "unknown";
+  }
+
+  if (runtime.healthStatus === "degraded") {
+    return "degraded";
+  }
+
+  return runtime.status as Instance["status"];
+}
+
 function getWorkspaceNoticeToneClass(tone: WorkspaceNoticeTone): string {
   if (tone === "warning") {
     return "workspace-notice-warning";
@@ -365,6 +452,7 @@ const InstancesPage = () => {
   const updateMenuRef = useRef<HTMLDivElement | null>(null);
   const consoleEventSourceRef = useRef<EventSource | null>(null);
   const consoleOutputRef = useRef<HTMLDivElement | null>(null);
+  const consoleInputRef = useRef<HTMLInputElement | null>(null);
   const [instances, setInstances] = useState<Instance[]>([]);
   const [instanceBdsStatuses, setInstanceBdsStatuses] = useState<Record<string, BdsInstall>>({});
   const [selectedInstanceId, setSelectedInstanceId] = useState<string>("");
@@ -374,6 +462,7 @@ const InstancesPage = () => {
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [creatingInstance, setCreatingInstance] = useState(false);
   const [savingInstance, setSavingInstance] = useState(false);
+  const [deletingInstance, setDeletingInstance] = useState(false);
   const [serverPropertiesEditorOpen, setServerPropertiesEditorOpen] = useState(false);
   const [serverPropertiesLoading, setServerPropertiesLoading] = useState(false);
   const [serverPropertiesSaving, setServerPropertiesSaving] = useState(false);
@@ -403,7 +492,15 @@ const InstancesPage = () => {
     tailView: true,
   });
   const [logViewerError, setLogViewerError] = useState("");
+  const [addonActionInFlight, setAddonActionInFlight] = useState<string>("");
+  const [addonOrderSaving, setAddonOrderSaving] = useState(false);
+  const [draggedAddonId, setDraggedAddonId] = useState("");
+  const [addonDropIndicator, setAddonDropIndicator] = useState<{
+    addonId: string;
+    placement: AddonDropPlacement;
+  } | null>(null);
   const [banner, setBanner] = useState<BannerState | null>(null);
+  const notificationDurationMs = useNotificationDurationMs();
   const [updateMenuOpen, setUpdateMenuOpen] = useState(false);
   const [actionInFlight, setActionInFlight] = useState<"start" | "stop" | "restart" | "backup" | "check-update" | "update" | "">("");
   const [editingInstance, setEditingInstance] = useState(false);
@@ -423,6 +520,7 @@ const InstancesPage = () => {
     updateCheckTime: DEFAULT_UPDATE_TIME,
     updateCheckWeekday: DEFAULT_UPDATE_WEEKDAY,
   });
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [error, setError] = useState("");
   const [startValidationFeedback, setStartValidationFeedback] = useState<BdsStartValidationResult | null>(null);
   const [dismissedWorkspaceNoticeIds, setDismissedWorkspaceNoticeIds] = useState<string[]>([]);
@@ -509,12 +607,13 @@ const InstancesPage = () => {
       setError("");
 
       try {
-        const [instanceResult, settingsResult, bdsResult, runtimeResult, eventsResult] = await Promise.all([
+        const [instanceResult, settingsResult, bdsResult, runtimeResult, eventsResult, addonsResult] = await Promise.all([
           getInstance(selectedInstanceId),
           getInstanceSettings(selectedInstanceId),
           getInstanceBdsStatus(selectedInstanceId),
           getInstanceBdsRuntime(selectedInstanceId),
           getInstanceRuntimeEvents(selectedInstanceId),
+          getInstanceAddons(selectedInstanceId),
         ]);
 
         setWorkspaceData({
@@ -523,6 +622,7 @@ const InstancesPage = () => {
           bds: bdsResult.bds,
           runtime: runtimeResult.runtime,
           events: eventsResult.events,
+          addons: addonsResult.addons,
         });
         setInstanceEditor({
           friendlyName: instanceResult.instance.friendlyName,
@@ -562,6 +662,10 @@ const InstancesPage = () => {
         tailView: true,
       });
       setLogViewerError("");
+      setAddonActionInFlight("");
+      setAddonOrderSaving(false);
+      setDraggedAddonId("");
+      setAddonDropIndicator(null);
     }
   }, [rightPaneMode, selectedInstanceId]);
 
@@ -613,6 +717,39 @@ const InstancesPage = () => {
         liveOutput: payload.liveOutput,
         canWrite: payload.canWrite,
       }));
+      if (!payload.runtime) {
+        return;
+      }
+
+      const runtime = payload.runtime;
+      const nextStatus = mapRuntimeStateToInstanceStatus(runtime);
+      setWorkspaceData((current) => {
+        if (!current || current.instance.id !== selectedInstanceId) {
+          return current;
+        }
+
+        return {
+          ...current,
+          runtime,
+          instance:
+            current.instance.status === nextStatus
+              ? current.instance
+              : {
+                  ...current.instance,
+                  status: nextStatus,
+                },
+        };
+      });
+      setInstances((current) =>
+        current.map((instance) =>
+          instance.id === selectedInstanceId && instance.status !== nextStatus
+            ? {
+                ...instance,
+                status: nextStatus,
+              }
+            : instance,
+        ),
+      );
     });
 
     eventSource.onerror = () => {
@@ -635,6 +772,25 @@ const InstancesPage = () => {
 
     consoleOutputRef.current.scrollTop = consoleOutputRef.current.scrollHeight;
   }, [consoleOpen, consoleSession.lines]);
+
+  useEffect(() => {
+    if (!consoleOpen || consoleCommandSending) {
+      return;
+    }
+
+    const input = consoleInputRef.current;
+    if (!input || input.disabled) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      input.focus();
+    }, 0);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [consoleOpen, consoleSession.canWrite, consoleCommandSending]);
 
   useEffect(() => {
     function handlePointerDown(event: PointerEvent) {
@@ -703,12 +859,13 @@ const InstancesPage = () => {
   }, [actionInFlight, selectedInstanceId]);
 
   async function refreshSelectedInstance(instanceId: string) {
-    const [instanceResult, settingsResult, bdsResult, runtimeResult, eventsResult] = await Promise.all([
+    const [instanceResult, settingsResult, bdsResult, runtimeResult, eventsResult, addonsResult] = await Promise.all([
       getInstance(instanceId),
       getInstanceSettings(instanceId),
       getInstanceBdsStatus(instanceId),
       getInstanceBdsRuntime(instanceId),
       getInstanceRuntimeEvents(instanceId),
+      getInstanceAddons(instanceId),
     ]);
 
     setWorkspaceData({
@@ -717,6 +874,7 @@ const InstancesPage = () => {
       bds: bdsResult.bds,
       runtime: runtimeResult.runtime,
       events: eventsResult.events,
+      addons: addonsResult.addons,
     });
     setInstanceEditor({
       friendlyName: instanceResult.instance.friendlyName,
@@ -777,6 +935,137 @@ const InstancesPage = () => {
     }
   }
 
+  async function handleAddonEnablement(addon: InstanceAddon, action: "enable" | "disable") {
+    if (!selectedInstanceId) {
+      return;
+    }
+
+    setAddonActionInFlight(`${action}:${addon.id}`);
+    setError("");
+
+    try {
+      if (action === "enable") {
+        await enableInstanceAddon(selectedInstanceId, addon.id);
+      } else {
+        await disableInstanceAddon(selectedInstanceId, addon.id);
+      }
+
+      await refreshSelectedInstance(selectedInstanceId);
+      setBanner({
+        tone: "info",
+        message: `${action === "enable" ? "Enabled" : "Disabled"} ${addon.name}.`,
+      });
+    } catch (enablementError) {
+      setError(enablementError instanceof Error ? enablementError.message : `Unable to ${action} addon`);
+    } finally {
+      setAddonActionInFlight("");
+    }
+  }
+
+  useEffect(() => {
+    if (!banner) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setBanner(null);
+    }, notificationDurationMs);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [banner, notificationDurationMs]);
+
+  async function handleAutoSortAddons() {
+    if (!selectedInstanceId) {
+      return;
+    }
+
+    setAddonOrderSaving(true);
+    setDraggedAddonId("");
+    setAddonDropIndicator(null);
+    setError("");
+
+    try {
+      await autoSortInstanceAddons(selectedInstanceId);
+      await refreshSelectedInstance(selectedInstanceId);
+      setBanner({
+        tone: "info",
+        message: "Applied a safe automatic addon order.",
+      });
+    } catch (sortError) {
+      setError(sortError instanceof Error ? sortError.message : "Unable to automatically sort addons");
+    } finally {
+      setAddonOrderSaving(false);
+    }
+  }
+
+  async function saveAddonOrder(addonIds: string[]) {
+    if (!selectedInstanceId) {
+      return;
+    }
+
+    setAddonOrderSaving(true);
+    setError("");
+
+    try {
+      await updateInstanceAddonOrder(selectedInstanceId, { addonIds });
+      await refreshSelectedInstance(selectedInstanceId);
+      setBanner({
+        tone: "info",
+        message: "Updated addon stack order.",
+      });
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Unable to update addon order");
+    } finally {
+      setAddonOrderSaving(false);
+      setDraggedAddonId("");
+      setAddonDropIndicator(null);
+    }
+  }
+
+  function handleAddonDragStart(addonId: string) {
+    if (addonActionInFlight !== "" || addonOrderSaving) {
+      return;
+    }
+
+    setDraggedAddonId(addonId);
+    setAddonDropIndicator(null);
+  }
+
+  function handleAddonDragEnd() {
+    setDraggedAddonId("");
+    setAddonDropIndicator(null);
+  }
+
+  function handleAddonDragOver(event: DragEvent<HTMLElement>, addonId: string) {
+    if (!draggedAddonId || draggedAddonId === addonId || addonOrderSaving) {
+      return;
+    }
+
+    event.preventDefault();
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const placement: AddonDropPlacement = event.clientY >= bounds.top + bounds.height / 2 ? "after" : "before";
+    setAddonDropIndicator((current) =>
+      current?.addonId === addonId && current.placement === placement ? current : { addonId, placement },
+    );
+  }
+
+  async function handleAddonDrop(addonId: string) {
+    if (!workspaceData || !draggedAddonId || draggedAddonId === addonId || addonOrderSaving) {
+      return;
+    }
+
+    const placement = addonDropIndicator?.addonId === addonId ? addonDropIndicator.placement : "before";
+    const nextAddonOrder = moveAddonId(
+      workspaceData.addons.map((addon) => addon.id),
+      draggedAddonId,
+      addonId,
+      placement,
+    );
+    await saveAddonOrder(nextAddonOrder);
+  }
+
   const handleCreateInstance = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setCreatingInstance(true);
@@ -830,12 +1119,45 @@ const InstancesPage = () => {
     }
   };
 
+  const handleDeleteInstance = async () => {
+    if (!selectedInstanceId || !workspaceData) {
+      return;
+    }
+
+    setDeletingInstance(true);
+    setError("");
+    setBanner(null);
+
+    try {
+      await deleteInstance(selectedInstanceId);
+      setEditingInstance(false);
+      setDeleteConfirmOpen(false);
+      setSelectedInstanceId("");
+      setWorkspaceData(null);
+      setInstanceBdsStatuses((current) => {
+        const next = { ...current };
+        delete next[selectedInstanceId];
+        return next;
+      });
+      setBanner({
+        tone: "info",
+        message: `Deleted ${workspaceData.instance.friendlyName}.`,
+      });
+      await loadInstances("");
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : "Unable to delete instance");
+    } finally {
+      setDeletingInstance(false);
+    }
+  };
+
   const closeInstanceEditor = () => {
-    if (savingInstance || !workspaceData) {
+    if (savingInstance || deletingInstance || !workspaceData) {
       return;
     }
 
     setEditingInstance(false);
+    setDeleteConfirmOpen(false);
     setInstanceEditor({
       friendlyName: workspaceData.instance.friendlyName,
       automaticUpdatesEnabled: workspaceData.instance.automaticUpdatesEnabled,
@@ -1075,6 +1397,11 @@ const InstancesPage = () => {
       });
       await loadInstances(selectedInstanceId);
       await refreshSelectedInstance(selectedInstanceId);
+      setServerPropertiesEditorOpen(false);
+      setBanner({
+        tone: "info",
+        message: "Saved server.properties.",
+      });
     } catch (saveError) {
       setServerPropertiesError(saveError instanceof Error ? saveError.message : "Unable to save server.properties");
     } finally {
@@ -1082,29 +1409,44 @@ const InstancesPage = () => {
     }
   };
 
+  const consoleStatusToneClass =
+    consoleSession.runtime?.status === "stopped"
+      ? "status-stopped"
+      : consoleSession.canWrite && consoleSession.liveOutput
+        ? "status-current"
+        : "status-warning";
+  const consoleStatusLabel =
+    consoleSession.runtime?.status === "stopped"
+      ? "Stopped"
+      : consoleSession.canWrite && consoleSession.liveOutput
+        ? "Connected"
+        : "Read-only";
+
   return (
     <section className="instances-layout">
-      {error ? (
-        <div className="status-banner status-banner-error" role="alert">
-          <span>{error}</span>
-          <button type="button" className="status-banner-close" onClick={() => setError("")} aria-label="Dismiss alert">
-            Close
-          </button>
-        </div>
-      ) : null}
-      {banner ? (
-        <div className={`status-banner status-banner-${banner.tone}`} role="status">
-          <span>{banner.message}</span>
-          <button
-            type="button"
-            className="status-banner-close"
-            onClick={() => setBanner(null)}
-            aria-label="Dismiss notification"
-          >
-            Close
-          </button>
-        </div>
-      ) : null}
+      <div className="status-banner-layer" aria-live="polite">
+        {error ? (
+          <div className="status-banner status-banner-error" role="alert">
+            <span>{error}</span>
+            <button type="button" className="status-banner-close" onClick={() => setError("")} aria-label="Dismiss alert">
+              Close
+            </button>
+          </div>
+        ) : null}
+        {banner ? (
+          <div className={`status-banner status-banner-${banner.tone}`} role="status">
+            <span>{banner.message}</span>
+            <button
+              type="button"
+              className="status-banner-close"
+              onClick={() => setBanner(null)}
+              aria-label="Dismiss notification"
+            >
+              Close
+            </button>
+          </div>
+        ) : null}
+      </div>
 
       <section
         className="instances-workspace"
@@ -1736,8 +2078,77 @@ const InstancesPage = () => {
                 {activeTab === "addons" ? (
                   <div className="instance-details-sections instance-details-sections-single">
                     <section className="instance-detail-section">
-                      <h3>Addons</h3>
-                      <p className="muted-copy">Addon management will live here once the installation and enablement flow is ready.</p>
+                      <div className="instance-detail-section-header">
+                        <div className="instance-detail-section-copy">
+                          <h3>Addon Stack</h3>
+                          <p className="muted-copy">Enable addons and arrange the order they are applied to this instance.</p>
+                        </div>
+                        <button
+                          type="button"
+                          className="secondary-button"
+                          onClick={() => void handleAutoSortAddons()}
+                          disabled={workspaceData.runtime.isProcessActive || addonActionInFlight !== "" || addonOrderSaving || workspaceData.addons.length < 2}
+                        >
+                          {addonOrderSaving ? "Sorting..." : "Automatic Sort"}
+                        </button>
+                      </div>
+                      {workspaceData.addons.length === 0 ? (
+                        <div className="instance-addons-empty">
+                          <p className="muted-copy">No addons are linked to this instance yet. Link them from Addon Library.</p>
+                        </div>
+                      ) : (
+                        <div className="instance-addon-table" role="table" aria-label="Instance addon stack">
+                          <div className="instance-addon-table-header" role="row">
+                            <span role="columnheader">Order #</span>
+                            <span role="columnheader">Addon Name</span>
+                            <span role="columnheader">Packs</span>
+                            <span role="columnheader">Action</span>
+                          </div>
+                          {workspaceData.addons.map((addon, index) => (
+                            <article
+                              key={addon.id}
+                              className={`instance-addon-table-row${draggedAddonId === addon.id ? " dragging" : ""}${
+                                addonDropIndicator?.addonId === addon.id ? ` drop-${addonDropIndicator.placement}` : ""
+                              }`}
+                              role="row"
+                              draggable={addonActionInFlight === "" && !addonOrderSaving}
+                              onDragStart={() => handleAddonDragStart(addon.id)}
+                              onDragEnd={handleAddonDragEnd}
+                              onDragOver={(event) => handleAddonDragOver(event, addon.id)}
+                              onDrop={(event) => {
+                                event.preventDefault();
+                                void handleAddonDrop(addon.id);
+                              }}
+                            >
+                              <span className="instance-addon-order" role="cell">
+                                <GripVertical aria-hidden="true" />
+                                <strong>{index + 1}</strong>
+                              </span>
+                              <span className="instance-addon-name" role="cell">
+                                <strong>{addon.name}</strong>
+                                {addon.summary ? <small>{addon.summary}</small> : null}
+                                <small className={`instance-bds-status ${getAddonStatusToneClass(addon.status)}`}>
+                                  {formatLabel(addon.status)}
+                                </small>
+                              </span>
+                              <span role="cell">{getAddonPackSummary(addon)}</span>
+                              <span className="instance-addon-actions" role="cell">
+                                <button
+                                  type="button"
+                                  className={addon.status === "enabled" ? "toggle-switch active" : "toggle-switch"}
+                                  aria-pressed={addon.status === "enabled"}
+                                  aria-label={`${addon.status === "enabled" ? "Disable" : "Enable"} ${addon.name}`}
+                                  title={`${addon.status === "enabled" ? "Disable" : "Enable"} ${addon.name}`}
+                                  onClick={() => void handleAddonEnablement(addon, addon.status === "enabled" ? "disable" : "enable")}
+                                  disabled={addon.status === "error" || workspaceData.runtime.isProcessActive || addonActionInFlight !== "" || addonOrderSaving}
+                                >
+                                  <span className="toggle-switch-thumb" />
+                                </button>
+                              </span>
+                            </article>
+                          ))}
+                        </div>
+                      )}
                     </section>
                   </div>
                 ) : null}
@@ -1803,29 +2214,29 @@ const InstancesPage = () => {
                 />
                 <aside className="instance-editor-drawer instance-console-drawer">
                   <div className="instance-editor-drawer-header">
-                    <div>
+                    <div className="instance-console-header">
                       <p className="eyebrow">BDS Console</p>
                       <h3>{workspaceData?.instance.friendlyName ?? "Instance console"}</h3>
+                      <div className="instance-console-header-status">
+                        <span className={`instance-bds-status ${consoleStatusToneClass}`}>{consoleStatusLabel}</span>
+                      </div>
                     </div>
+                    <button
+                      type="button"
+                      className="icon-action"
+                      onClick={closeConsole}
+                      disabled={consoleCommandSending}
+                      aria-label="Close console"
+                      title="Close console"
+                    >
+                      <X aria-hidden="true" />
+                    </button>
                   </div>
 
-                  <div className="instance-console-meta">
-                    <span className={`instance-bds-status ${consoleSession.canWrite ? "status-current" : "status-warning"}`}>
-                      {consoleSession.canWrite ? "Live command channel ready" : "Read-only"}
-                    </span>
-                    <span className={`instance-bds-status ${consoleSession.liveOutput ? "status-running" : "status-degraded"}`}>
-                      {consoleSession.liveOutput ? "Live output connected" : "No live output"}
-                    </span>
-                  </div>
-
-                  {consoleConnecting ? <p className="muted-copy">Connecting to the shared console stream...</p> : null}
-                  {consoleSession.runtime?.message ? <div className="instances-inline-note">{consoleSession.runtime.message}</div> : null}
                   {consoleError ? <div className="form-error">{consoleError}</div> : null}
 
                   <div ref={consoleOutputRef} className="instance-console-output" role="log" aria-live="polite" aria-relevant="additions text">
-                    {consoleSession.lines.length === 0 ? (
-                      <p className="muted-copy">No console output has been captured for this session yet.</p>
-                    ) : (
+                    {consoleSession.lines.length > 0 &&
                       consoleSession.lines.map((line) => (
                         <div key={line.id} className={`instance-console-line source-${line.source}`}>
                           <time className="instance-console-line-time" dateTime={line.createdAt}>
@@ -1834,34 +2245,19 @@ const InstancesPage = () => {
                           <span className="instance-console-line-source">{line.source}</span>
                           <span className="instance-console-line-text">{line.text}</span>
                         </div>
-                      ))
-                    )}
+                      ))}
                   </div>
 
                   <form className="instance-console-form" onSubmit={handleSendConsoleCommand}>
                     <input
+                      ref={consoleInputRef}
+                      className="instance-console-input"
                       value={consoleCommand}
                       onChange={(event) => setConsoleCommand(event.target.value)}
-                      placeholder={
-                        consoleSession.canWrite
-                          ? "Enter a BDS command"
-                          : "Console commands are unavailable until the instance is running under live Chroma management"
-                      }
+                      placeholder={consoleSession.canWrite ? "Enter a BDS command" : ""}
                       disabled={!consoleSession.canWrite || consoleCommandSending}
                       spellCheck={false}
                     />
-                    <div className="instances-form-actions">
-                      <button
-                        type="submit"
-                        className="primary-button"
-                        disabled={!consoleSession.canWrite || consoleCommandSending || consoleCommand.trim() === ""}
-                      >
-                        {consoleCommandSending ? "Sending..." : "Send"}
-                      </button>
-                      <button type="button" className="secondary-button" onClick={closeConsole} disabled={consoleCommandSending}>
-                        Close
-                      </button>
-                    </div>
                   </form>
                 </aside>
               </div>
@@ -1881,106 +2277,147 @@ const InstancesPage = () => {
                       <p className="eyebrow">Instance Editor</p>
                       <h3>Overview</h3>
                     </div>
+                    <button
+                      type="button"
+                      className={`icon-action icon-action-danger${deleteConfirmOpen ? " icon-action-danger-active" : ""}`}
+                      onClick={() => setDeleteConfirmOpen((open) => !open)}
+                      disabled={savingInstance || deletingInstance}
+                      title="Delete instance"
+                      aria-label="Delete instance"
+                      aria-pressed={deleteConfirmOpen}
+                    >
+                      <Trash2 aria-hidden="true" />
+                    </button>
                   </div>
 
-                  <form className="form-grid instances-create-form" onSubmit={handleSaveInstance}>
-                    <label>
-                      Instance name
-                      <input
-                        value={instanceEditor.friendlyName}
-                        onChange={(event) => setInstanceEditor((current) => ({ ...current, friendlyName: event.target.value }))}
-                      />
-                    </label>
+                  <form className="form-grid instances-create-form instance-editor-form" onSubmit={handleSaveInstance}>
+                    <div className="instance-editor-fields">
+                      <label>
+                        Instance name
+                        <input
+                          value={instanceEditor.friendlyName}
+                          onChange={(event) => setInstanceEditor((current) => ({ ...current, friendlyName: event.target.value }))}
+                        />
+                      </label>
 
-                    <div className="instances-toggle-row">
-                      <div className="instances-toggle-copy">
-                        <strong>Enable automatic updating</strong>
-                        <span>
-                          {instanceEditor.automaticUpdatesEnabled ? "Automatic updating enabled" : "Automatic updating disabled"}
-                        </span>
+                      <div className="instances-toggle-row">
+                        <div className="instances-toggle-copy">
+                          <strong>Enable automatic updating</strong>
+                          <span>
+                            {instanceEditor.automaticUpdatesEnabled ? "Automatic updating enabled" : "Automatic updating disabled"}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          className={instanceEditor.automaticUpdatesEnabled ? "toggle-switch active" : "toggle-switch"}
+                          aria-pressed={instanceEditor.automaticUpdatesEnabled}
+                          onClick={() =>
+                            setInstanceEditor((current) => ({
+                              ...current,
+                              automaticUpdatesEnabled: !current.automaticUpdatesEnabled,
+                            }))
+                          }
+                        >
+                          <span className="toggle-switch-thumb" />
+                        </button>
                       </div>
-                      <button
-                        type="button"
-                        className={instanceEditor.automaticUpdatesEnabled ? "toggle-switch active" : "toggle-switch"}
-                        aria-pressed={instanceEditor.automaticUpdatesEnabled}
-                        onClick={() =>
-                          setInstanceEditor((current) => ({
-                            ...current,
-                            automaticUpdatesEnabled: !current.automaticUpdatesEnabled,
-                          }))
-                        }
-                      >
-                        <span className="toggle-switch-thumb" />
-                      </button>
-                    </div>
 
-                    {instanceEditor.automaticUpdatesEnabled ? (
-                      <div className="instances-schedule-grid">
-                        <label>
-                          Check for updates
-                          <select
-                            value={instanceEditor.updateCheckFrequency}
-                            onChange={(event) =>
-                              setInstanceEditor((current) => ({
-                                ...current,
-                                updateCheckFrequency: event.target.value === "weekly" ? "weekly" : "daily",
-                              }))
-                            }
-                          >
-                            <option value="daily">Daily</option>
-                            <option value="weekly">Weekly</option>
-                          </select>
-                        </label>
-
-                        <label>
-                          Check time
-                          <input
-                            type="time"
-                            value={instanceEditor.updateCheckTime}
-                            onChange={(event) =>
-                              setInstanceEditor((current) => ({ ...current, updateCheckTime: event.target.value }))
-                            }
-                          />
-                        </label>
-
-                        {instanceEditor.updateCheckFrequency === "weekly" ? (
+                      {instanceEditor.automaticUpdatesEnabled ? (
+                        <div className="instances-schedule-grid">
                           <label>
-                            Check day
+                            Check for updates
                             <select
-                              value={instanceEditor.updateCheckWeekday}
+                              value={instanceEditor.updateCheckFrequency}
                               onChange={(event) =>
                                 setInstanceEditor((current) => ({
                                   ...current,
-                                  updateCheckWeekday: event.target.value as InstanceEditorState["updateCheckWeekday"],
+                                  updateCheckFrequency: event.target.value === "weekly" ? "weekly" : "daily",
                                 }))
                               }
-                          >
-                            <option value="monday">Monday</option>
-                            <option value="tuesday">Tuesday</option>
-                            <option value="wednesday">Wednesday</option>
-                            <option value="thursday">Thursday</option>
-                            <option value="friday">Friday</option>
-                            <option value="saturday">Saturday</option>
-                            <option value="sunday">Sunday</option>
-                          </select>
-                        </label>
-                        ) : null}
+                            >
+                              <option value="daily">Daily</option>
+                              <option value="weekly">Weekly</option>
+                            </select>
+                          </label>
+
+                          <label>
+                            Check time
+                            <input
+                              type="time"
+                              value={instanceEditor.updateCheckTime}
+                              onChange={(event) =>
+                                setInstanceEditor((current) => ({ ...current, updateCheckTime: event.target.value }))
+                              }
+                            />
+                          </label>
+
+                          {instanceEditor.updateCheckFrequency === "weekly" ? (
+                            <label>
+                              Check day
+                              <select
+                                value={instanceEditor.updateCheckWeekday}
+                                onChange={(event) =>
+                                  setInstanceEditor((current) => ({
+                                    ...current,
+                                    updateCheckWeekday: event.target.value as InstanceEditorState["updateCheckWeekday"],
+                                  }))
+                                }
+                              >
+                                <option value="monday">Monday</option>
+                                <option value="tuesday">Tuesday</option>
+                                <option value="wednesday">Wednesday</option>
+                                <option value="thursday">Thursday</option>
+                                <option value="friday">Friday</option>
+                                <option value="saturday">Saturday</option>
+                                <option value="sunday">Sunday</option>
+                              </select>
+                            </label>
+                          ) : null}
+                        </div>
+                      ) : null}
+                    </div>
+
+                    <div className="instance-editor-footer">
+                      <div className="instances-form-actions">
+                        <button type="submit" className="primary-button" disabled={savingInstance}>
+                          {savingInstance ? "Saving..." : "Save"}
+                        </button>
+                        <button
+                          type="button"
+                          className="secondary-button"
+                          onClick={closeInstanceEditor}
+                          disabled={savingInstance}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+
+                    {deleteConfirmOpen ? (
+                      <div className="instance-delete-zone">
+                        <div className="instance-delete-confirm">
+                          <span>Are you sure you want to delete this instance?</span>
+                          <div className="instance-delete-confirm-actions">
+                            <button
+                              type="button"
+                              className="danger-button"
+                              onClick={() => void handleDeleteInstance()}
+                              disabled={deletingInstance}
+                            >
+                              {deletingInstance ? "Deleting..." : "Yes"}
+                            </button>
+                            <button
+                              type="button"
+                              className="secondary-button"
+                              onClick={() => setDeleteConfirmOpen(false)}
+                              disabled={deletingInstance}
+                            >
+                              No
+                            </button>
+                          </div>
+                        </div>
                       </div>
                     ) : null}
-
-                    <div className="instances-form-actions">
-                      <button type="submit" className="primary-button" disabled={savingInstance}>
-                        {savingInstance ? "Saving..." : "Save"}
-                      </button>
-                      <button
-                        type="button"
-                        className="secondary-button"
-                        onClick={closeInstanceEditor}
-                        disabled={savingInstance}
-                      >
-                        Cancel
-                      </button>
-                    </div>
                   </form>
                 </aside>
               </div>

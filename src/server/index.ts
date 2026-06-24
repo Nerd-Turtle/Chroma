@@ -1,5 +1,5 @@
 import { buildApp } from "./app.js";
-import { reconcileBdsRuntimeStates } from "./bds/bdsRuntimeService.js";
+import { initializeBdsRuntimeStateSynchronization, reconcileBdsRuntimeStates } from "./bds/bdsRuntimeService.js";
 import { ensureRuntimePaths, getDatabasePath, getRuntimePaths } from "./config/paths.js";
 import { openDatabase } from "./db/database.js";
 import { runMigrations } from "./db/migrations.js";
@@ -17,6 +17,7 @@ try {
   const db = openDatabase(databasePath);
   runMigrations(db);
   const app = buildApp(db);
+  initializeBdsRuntimeStateSynchronization(db, app.log);
   await reconcileBdsRuntimeStates(db, app.log);
   setupShutdownHandlers(app, db);
   startInstanceAutoUpdateScheduler(db, app.log);

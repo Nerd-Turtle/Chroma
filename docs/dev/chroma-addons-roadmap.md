@@ -2,13 +2,14 @@
 
 ## Overall Objective
 
-Build instance-scoped Bedrock addon management into Chroma so an operator can:
+Build Bedrock addon management into Chroma so an operator can:
 
 - browse and search supported addon providers from the Web UI
-- download selected Bedrock addons into the instance-managed addon workspace
+- download selected Bedrock addons into Chroma-managed storage
 - inspect which packs were discovered inside each addon archive
-- enable or disable addons without manually editing BDS files
-- keep downloaded addon files, enabled BDS pack folders, world pack references, logs, and backups scoped to one instance
+- enable or disable downloaded addons for specific instances without manually editing BDS files
+- keep enabled BDS pack folders, world pack references, logs, and backups scoped to one instance
+- eventually track downloaded addon versions centrally for update checks, retention, and revert capability
 
 The first provider target is CurseForge. The first supported game target is Minecraft Bedrock addons for Bedrock Dedicated Server instances.
 
@@ -21,35 +22,45 @@ Relevant existing project shape:
   - `bds/worlds/`
   - `bds/behavior_packs/`
   - `bds/resource_packs/`
-  - `csm/addons/`
-- The instance workspace already has an `Addons` tab placeholder in:
+- The instance workspace has an internal `Addons` tab in:
   - [src/web/src/pages/InstancesPage.tsx](/home/turtle/chroma/src/web/src/pages/InstancesPage.tsx)
+- The Web UI has a top-level `Addon Library` page in:
+  - [src/web/src/pages/AddonLibraryPage.tsx](/home/turtle/chroma/src/web/src/pages/AddonLibraryPage.tsx)
 - Runtime and maintenance events already exist through:
   - [src/server/instances/instanceRuntimeEventService.ts](/home/turtle/chroma/src/server/instances/instanceRuntimeEventService.ts)
 - Internal backups currently capture BDS config and worlds through:
   - [src/server/instances/instanceBackupService.ts](/home/turtle/chroma/src/server/instances/instanceBackupService.ts)
 
-This means addon work should fit into the current instance model rather than creating a separate top-level product area.
+Downloaded addon files are stored centrally under Chroma data storage. Instance rows currently register which downloaded addon files are available to an instance, while the intended longer-term product shape is a top-level Addon Library for discovery/download/update tracking plus an instance workspace tab for enable/disable state.
 
 ## Terms
 
-- Addon: the Chroma-level record for something the user downloaded for one instance.
+- Addon: the Chroma-level record for something the user downloaded. The current implementation stores central files plus per-instance registrations; a future library model should make downloaded versions first-class records.
 - Provider project: a project from an external provider such as CurseForge.
 - Provider file: a specific downloadable file/release from a provider project.
 - Pack: a Bedrock behavior pack or resource pack discovered inside an addon archive.
-- Downloaded: Chroma has stored the provider file in the instance's `csm/addons` workspace and parsed its packs.
+- Downloaded: Chroma has stored the provider file in `/var/lib/chroma/downloads/addons` and parsed its packs.
 - Enabled: Chroma has imported the addon packs into BDS and referenced them from the active world's pack JSON files.
-- Imported: copied from the Chroma addon workspace into `bds/behavior_packs` or `bds/resource_packs`.
+- Imported: copied from central Chroma addon storage into `bds/behavior_packs` or `bds/resource_packs`.
 
 CurseForge API docs use "mods" broadly. Chroma should use "addons" in UI and shared types because the product is managing Bedrock addons, not Java Edition mods.
 
 ## Core Product Model
 
-Addons belong to an instance.
+The product model should separate downloaded addons from instance enablement:
 
-Each instance has two addon-related filesystem zones:
+- Addon Library: the Chroma-level inventory for browsing, downloading, tracking updates, and retaining addon versions.
+- Instance Addons: the per-instance enabled/disabled state for downloaded addons.
 
-- `csm/addons`: Chroma-managed addon workspace. This is the source of truth for downloaded archives and parsed metadata.
+The current implementation stores downloaded files centrally, but still creates per-instance addon registration rows. The top-level Addon Library uses a target instance selector until a global addon-library database model is approved.
+
+Central addon files are stored under:
+
+- `/var/lib/chroma/downloads/addons`: production addon archive and extracted pack storage.
+- `.runtime/var/lib/chroma/downloads/addons`: development addon archive and extracted pack storage.
+
+Each instance has one addon-related generated runtime zone:
+
 - `bds/behavior_packs`, `bds/resource_packs`, and `bds/worlds/<world>`: generated BDS runtime state when addons are enabled.
 
 The BDS folders should be treated as generated state owned by Chroma for Chroma-managed addons. Users should not need to edit those files manually during normal use.
@@ -86,7 +97,7 @@ Disabling an addon:
 
 - removes Chroma-managed entries from world pack JSON files
 - removes only Chroma-owned imported pack folders
-- leaves the downloaded addon workspace intact
+- leaves central downloaded addon storage intact
 
 ### 3. Do not enable while BDS is running in v1
 
@@ -184,20 +195,25 @@ Future CLI:
 
 ## Filesystem Layout
 
-Suggested instance workspace layout:
+Central addon library layout:
+
+```text
+.runtime/var/lib/chroma/downloads/addons/
+  curseforge/
+    projects/
+      <projectId>/
+        files/
+          <fileId>/
+            archive/
+              <original-file-name>
+            extracted/
+              ...
+```
+
+Instance generated runtime layout:
 
 ```text
 <instancePath>/
-  csm/
-    addons/
-      curseforge-<projectId>/
-        addon.json
-        files/
-          <fileId>/
-            <original-file-name>
-        extracted/
-          <fileId>/
-            ...
   bds/
     behavior_packs/
       chroma_<packUuid>_<version>/
@@ -388,7 +404,7 @@ Steps:
 5. Mark addon as `disabled` if no packs remain enabled.
 6. Append an instance runtime event.
 
-Downloaded archives and extracted workspace files stay in `csm/addons`.
+Downloaded archives and extracted workspace files stay in central Chroma addon storage.
 
 ## API Shape
 
@@ -473,7 +489,7 @@ Initial manual cases:
    - sort changes result ordering
    - API key is never visible in browser responses
 3. Download valid addon
-   - archive appears under `csm/addons`
+   - archive appears under central Chroma addon storage
    - DB rows are created
    - packs are detected from `manifest.json`
 4. Reject malicious archive
@@ -528,6 +544,37 @@ Create the shared addon model, SQLite tables, repository functions, list routes,
 - Addons tab loads for an instance with no addons.
 - TypeScript catches shared type mismatches between backend and frontend.
 
+### Implementation Notes
+
+- Replaced the early shared addon placeholder model with the roadmap-aligned model in:
+  - [src/shared/types/addon.ts](/home/turtle/chroma/src/shared/types/addon.ts)
+  - [src/shared/types/index.ts](/home/turtle/chroma/src/shared/types/index.ts)
+  - [src/shared/types/web.ts](/home/turtle/chroma/src/shared/types/web.ts)
+- Added SQLite tables and indexes for downloaded instance addons and discovered addon packs in:
+  - [src/server/db/migrations.ts](/home/turtle/chroma/src/server/db/migrations.ts)
+- Added read-only backend addon list/detail plumbing in:
+  - [src/server/addons/addonRepository.ts](/home/turtle/chroma/src/server/addons/addonRepository.ts)
+  - [src/server/addons/addonService.ts](/home/turtle/chroma/src/server/addons/addonService.ts)
+  - [src/server/addons/addonRoutes.ts](/home/turtle/chroma/src/server/addons/addonRoutes.ts)
+  - [src/server/instances/instanceRoutes.ts](/home/turtle/chroma/src/server/instances/instanceRoutes.ts)
+- Added frontend API helpers and replaced the Addons placeholder with a read-only empty state/table in:
+  - [src/web/src/api/chromaApi.ts](/home/turtle/chroma/src/web/src/api/chromaApi.ts)
+  - [src/web/src/pages/InstancesPage.tsx](/home/turtle/chroma/src/web/src/pages/InstancesPage.tsx)
+  - [src/web/src/styles.css](/home/turtle/chroma/src/web/src/styles.css)
+- CurseForge provider calls, downloads, archive extraction, and enable/disable behavior were intentionally left for later phases.
+
+### Validation Notes
+
+- Ran `pnpm typecheck` successfully.
+- Ran `pnpm build` successfully.
+- Ran `pnpm build:web` successfully.
+- Ran `./dev/dev-run.sh -build` successfully; the staged API and web UI started under `.runtime`.
+- Manual browser smoke testing was not performed for this phase.
+
+### Status
+
+Completed on the current branch/worktree. Phase 1 is implemented as a read-only local addon model and UI shell.
+
 ## Phase 2: CurseForge Provider Configuration and Search
 
 ### Objective
@@ -551,18 +598,66 @@ Add backend-only CurseForge integration for provider status and search.
 - Search requests never expose the API key.
 - Result shape is stable and provider-specific details stay behind shared Chroma types.
 
+### Implementation Notes
+
+- Added shared provider status/search types in:
+  - [src/shared/types/addon.ts](/home/turtle/chroma/src/shared/types/addon.ts)
+  - [src/shared/types/web.ts](/home/turtle/chroma/src/shared/types/web.ts)
+  - [src/shared/types/index.ts](/home/turtle/chroma/src/shared/types/index.ts)
+- Added backend-only CurseForge API access in:
+  - [src/server/addons/curseForgeClient.ts](/home/turtle/chroma/src/server/addons/curseForgeClient.ts)
+  - [src/server/addons/curseForgeAddonProvider.ts](/home/turtle/chroma/src/server/addons/curseForgeAddonProvider.ts)
+- Added instance-scoped provider routes in:
+  - [src/server/addons/addonRoutes.ts](/home/turtle/chroma/src/server/addons/addonRoutes.ts)
+  - `GET /api/instances/:instanceId/addons/providers/curseforge/status`
+  - `GET /api/instances/:instanceId/addons/providers/curseforge/search`
+- The provider service:
+  - reads the CurseForge API key only on the backend from application settings
+  - discovers the Minecraft Bedrock game and Addons class from CurseForge games/categories
+  - caches resolved non-secret IDs in memory by API-key hint
+  - maps Chroma sort labels to CurseForge sort fields
+  - returns Chroma-shaped search results to the browser
+- Extended the Instance workspace Addons tab in:
+  - [src/web/src/api/chromaApi.ts](/home/turtle/chroma/src/web/src/api/chromaApi.ts)
+  - [src/web/src/pages/InstancesPage.tsx](/home/turtle/chroma/src/web/src/pages/InstancesPage.tsx)
+  - [src/web/src/styles.css](/home/turtle/chroma/src/web/src/styles.css)
+- Removed the top-level muted Addons item from:
+  - [src/web/src/components/TopNav.tsx](/home/turtle/chroma/src/web/src/components/TopNav.tsx)
+- Downloads remain disabled and are intentionally left for Phase 3.
+
+### Validation Notes
+
+- Verified current CurseForge API documentation for:
+  - base URL `https://api.curseforge.com`
+  - `x-api-key` authentication
+  - page-size limits
+  - games, categories, and mod search endpoints
+  - search sort field enum values
+- Ran `pnpm typecheck` successfully.
+- Ran `pnpm build` successfully.
+- Ran `pnpm build:web` successfully.
+- Live CurseForge provider discovery was validated with a real API key stored in the local SQLite app settings.
+- Live CurseForge search was validated with the Version filter blank:
+  - provider resolved to `minecraft-bedrock` / `addons`
+  - search returned results without exposing the API key to the browser
+- Exact BDS patch versions such as `1.26.31.1` can return zero CurseForge results, so the Version filter now starts blank and shows an empty-results hint when needed.
+
+### Status
+
+Completed on the current branch/worktree. Phase 2 is implemented as provider status/search only; no addon files are downloaded yet.
+
 ## Phase 3: Download and Archive Inspection
 
 ### Objective
 
-Download a selected CurseForge file into the instance addon workspace and parse its Bedrock packs.
+Download a selected CurseForge file into Chroma-managed addon storage and parse its Bedrock packs.
 
 ### Scope
 
 - Add download route.
 - Use CurseForge file download URL endpoint.
 - Store original archive.
-- Extract into `csm/addons`.
+- Extract into Chroma-managed addon storage.
 - Parse manifests.
 - Insert `instance_addons` and `instance_addon_packs` rows.
 - Show downloaded addons and pack summaries in UI.
@@ -571,7 +666,53 @@ Download a selected CurseForge file into the instance addon workspace and parse 
 
 - Valid `.mcpack`, `.mcaddon`, and `.zip` samples can be parsed.
 - Unsupported or malformed archives become visible errors.
-- Path traversal fixtures cannot write outside `csm/addons`.
+- Path traversal fixtures cannot write outside Chroma-managed addon storage.
+
+### Implementation Notes
+
+- Extended CurseForge API support in:
+  - [src/server/addons/curseForgeClient.ts](/home/turtle/chroma/src/server/addons/curseForgeClient.ts)
+  - Added mod detail, file detail, and file download URL calls.
+- Added safe archive inspection in:
+  - [src/server/addons/addonArchiveService.ts](/home/turtle/chroma/src/server/addons/addonArchiveService.ts)
+- Archive inspection now:
+  - rejects absolute paths and `..` traversal
+  - rejects symlinks
+  - extracts `.zip`, `.mcpack`, and `.mcaddon` zip-shaped archives
+  - supports one level of nested `.mcpack` archives
+  - parses Bedrock `manifest.json`
+  - classifies packs as behavior, resource, or unsupported unknown
+  - keeps bounded entry and extracted-size limits
+- Added addon/packs write support in:
+  - [src/server/addons/addonRepository.ts](/home/turtle/chroma/src/server/addons/addonRepository.ts)
+  - [src/server/addons/addonService.ts](/home/turtle/chroma/src/server/addons/addonService.ts)
+- Added the download route in:
+  - [src/server/addons/addonRoutes.ts](/home/turtle/chroma/src/server/addons/addonRoutes.ts)
+  - `POST /api/instances/:instanceId/addons/providers/curseforge/download`
+- Added frontend download support in:
+  - [src/shared/types/web.ts](/home/turtle/chroma/src/shared/types/web.ts)
+  - [src/shared/types/index.ts](/home/turtle/chroma/src/shared/types/index.ts)
+  - [src/web/src/api/chromaApi.ts](/home/turtle/chroma/src/web/src/api/chromaApi.ts)
+  - [src/web/src/pages/InstancesPage.tsx](/home/turtle/chroma/src/web/src/pages/InstancesPage.tsx)
+- Downloaded addons remain inactive. Enable/disable behavior is intentionally left for Phase 4.
+
+### Validation Notes
+
+- Ran `pnpm typecheck` successfully.
+- Ran `pnpm build` successfully.
+- Ran `pnpm build:web` successfully.
+- Ran `git diff --check` successfully.
+- Ran `./dev/dev-run.sh -build` successfully; the staged API and web UI started under `.runtime`.
+- Live CurseForge download/inspection was initially validated with `Slugs Reloaded`:
+  - original `.mcaddon` stored under the selected instance's addon workspace before central storage was added in Phase 4.6
+  - archive extracted under the selected instance's addon workspace before central storage was added in Phase 4.6
+  - one behavior pack and one resource pack were discovered from `manifest.json`
+  - `instance_addons` and `instance_addon_packs` rows were created
+- Initial validation showed a real Bedrock addon can exceed 2,000 ZIP entries, so the entry limit was raised to 10,000 while keeping an extracted-size cap.
+
+### Status
+
+Completed on the current branch/worktree. Phase 3 supports downloading and inspecting CurseForge addon files, but does not enable them in BDS yet.
 
 ## Phase 4: Enable and Disable Addons
 
@@ -594,9 +735,207 @@ Make downloaded addons active or inactive for the selected instance's active wor
 ### Validation Rules
 
 - Enable modifies only the selected instance.
-- Disable leaves the downloaded addon workspace intact.
+- Disable leaves central downloaded addon storage intact.
 - Running instances block addon changes.
 - Internal backup exists before world JSON changes.
+
+### Implementation Notes
+
+- Added addon enablement backend logic in:
+  - [src/server/addons/addonEnablementService.ts](/home/turtle/chroma/src/server/addons/addonEnablementService.ts)
+- Added addon/pack status update support in:
+  - [src/server/addons/addonRepository.ts](/home/turtle/chroma/src/server/addons/addonRepository.ts)
+- Added enable/disable routes in:
+  - [src/server/addons/addonRoutes.ts](/home/turtle/chroma/src/server/addons/addonRoutes.ts)
+  - `POST /api/instances/:instanceId/addons/:addonId/enable`
+  - `POST /api/instances/:instanceId/addons/:addonId/disable`
+- Enable behavior:
+  - requires the instance runtime to be stopped/inactive
+  - resolves the active world from `activeWorldName`, a single world directory, or the default `Bedrock level`
+  - creates an internal revert backup before world JSON changes
+  - copies behavior/resource packs into Chroma-owned BDS pack folders
+  - updates `world_behavior_packs.json` and `world_resource_packs.json`
+  - marks addon and pack rows enabled
+  - records an instance runtime event
+- Disable behavior:
+  - requires the instance runtime to be stopped/inactive
+  - creates an internal revert backup before world JSON changes
+  - removes matching world pack JSON entries
+  - removes only recorded Chroma-owned imported pack folders
+  - leaves central downloaded addon storage intact
+  - marks addon and pack rows disabled
+  - records an instance runtime event
+- Added Instance Addons table actions in:
+  - [src/web/src/api/chromaApi.ts](/home/turtle/chroma/src/web/src/api/chromaApi.ts)
+  - [src/web/src/pages/InstancesPage.tsx](/home/turtle/chroma/src/web/src/pages/InstancesPage.tsx)
+  - [src/web/src/styles.css](/home/turtle/chroma/src/web/src/styles.css)
+
+### Validation Notes
+
+- Ran `pnpm typecheck` successfully.
+- Ran `pnpm build` successfully.
+- Ran `pnpm build:web` successfully.
+- Ran `git diff --check` successfully.
+- Ran `./dev/dev-run.sh -build` successfully; the staged API and web UI started under `.runtime`.
+- Live enable/disable was validated with the previously downloaded `Slugs Reloaded` addon:
+  - enable changed addon status to `enabled`
+  - one behavior pack and one resource pack were copied into BDS pack directories
+  - world behavior/resource pack JSON files were updated
+  - internal revert backups were created
+  - disable changed addon status to `disabled`
+  - world pack JSON files were emptied again
+  - imported Chroma-owned pack folders were removed
+  - downloaded addon files remained intact
+
+### Status
+
+Completed on the current branch/worktree. Phase 4 supports stopped-instance addon enable/disable; running-instance maintenance flow remains Phase 6.
+
+## Phase 4.5: Addon Library Navigation
+
+### Objective
+
+Separate addon discovery/download from per-instance enablement in the Web UI.
+
+### Scope
+
+- Restore a top-level `Addon Library` navigation entry.
+- Move CurseForge browse/download UI out of the Instance workspace.
+- Keep the Instance workspace `Addons` tab focused on downloaded addons for that instance and enable/disable actions.
+- Use the current per-instance addon registration model for now, with a target instance selector in the library download flow.
+- Defer a true global addon-library data model and version retention policy to a later phase.
+
+### Implementation Notes
+
+- Added a top-level Addon Library page in:
+  - [src/web/src/pages/AddonLibraryPage.tsx](/home/turtle/chroma/src/web/src/pages/AddonLibraryPage.tsx)
+- Restored primary navigation for `Addon Library` in:
+  - [src/web/src/components/TopNav.tsx](/home/turtle/chroma/src/web/src/components/TopNav.tsx)
+  - [src/web/src/App.tsx](/home/turtle/chroma/src/web/src/App.tsx)
+- Simplified the Instance workspace `Addons` tab in:
+  - [src/web/src/pages/InstancesPage.tsx](/home/turtle/chroma/src/web/src/pages/InstancesPage.tsx)
+- Added Addon Library layout and control styling in:
+  - [src/web/src/styles.css](/home/turtle/chroma/src/web/src/styles.css)
+
+### Validation Notes
+
+- Ran `pnpm typecheck` successfully.
+- Ran `pnpm build:web` successfully.
+- Ran `git diff --check` successfully.
+
+### Status
+
+Completed on the current branch/worktree as a UI/product-structure step. Downloaded files are central, and Phase 4.7 completes central database registration.
+
+## Phase 4.6: Central Addon Download Storage
+
+### Objective
+
+Move downloaded addon archives and extracted pack sources out of instance folders and into Chroma's central download storage.
+
+### Scope
+
+- Store CurseForge addon files under `/var/lib/chroma/downloads/addons`.
+- Store development CurseForge addon files under `.runtime/var/lib/chroma/downloads/addons`.
+- Keep per-instance BDS changes limited to copied `behavior_packs`, copied `resource_packs`, and world pack JSON references.
+- Reuse an already downloaded provider file instead of downloading duplicate archives for each instance.
+- Keep per-instance addon registration rows for enablement state, while central addon file records own provider metadata and downloaded file paths.
+
+### Implementation Notes
+
+- Added central addon storage path helpers in:
+  - [src/server/addons/addonStoragePaths.ts](/home/turtle/chroma/src/server/addons/addonStoragePaths.ts)
+- Updated CurseForge download storage in:
+  - [src/server/addons/addonService.ts](/home/turtle/chroma/src/server/addons/addonService.ts)
+- Updated enablement source-path validation in:
+  - [src/server/addons/addonEnablementService.ts](/home/turtle/chroma/src/server/addons/addonEnablementService.ts)
+- Removed new-instance creation of the old addon workspace directory in:
+  - [src/server/instances/instanceFilesystem.ts](/home/turtle/chroma/src/server/instances/instanceFilesystem.ts)
+
+### Validation Notes
+
+- Ran `pnpm typecheck` successfully.
+- Ran `pnpm build` successfully.
+- Ran `pnpm build:web` successfully.
+- Ran `git diff --check` successfully.
+- Ran `./dev/dev-run.sh -build` successfully; the staged API and web UI started under `.runtime`.
+- Live CurseForge download/enable/disable was validated with `Modern Furniture | +750 BLOCKS`:
+  - archive and extracted files were stored under `.runtime/var/lib/chroma/downloads/addons/curseforge/projects/829201/files/8296615`
+  - downloaded addon paths did not point under `.runtime/var/lib/chroma/instances`
+  - enable copied one pack into the selected instance's BDS pack folders
+  - disable removed the copied `chroma_*` pack folder from the instance
+  - central archive and extracted files remained after disable
+
+### Status
+
+Completed on the current branch/worktree. Downloaded addon files now live in central Chroma download storage; enable/disable copies only generated BDS pack state into the selected instance.
+
+## Phase 4.7: Central Addon Library Database
+
+### Objective
+
+Make central addon library records the canonical database registration for downloaded provider files and discovered packs.
+
+### Scope
+
+- Add central `addon_files` records for provider file metadata and archive/extracted paths.
+- Add central `addon_file_packs` records for discovered pack metadata and source paths.
+- Keep `instance_addons` as per-instance registration and enablement state linked to `addon_files`.
+- Keep `instance_addon_packs` as per-instance pack enablement state linked to `addon_file_packs`.
+- Backfill existing instance-scoped addon rows into central library records without deleting existing runtime data.
+- Add a central Addon Library list API for the Web UI.
+
+### Implementation Notes
+
+- Added central addon library tables, indexes, and backfill migration in:
+  - [src/server/db/migrations.ts](/home/turtle/chroma/src/server/db/migrations.ts)
+- Added central library item shared types in:
+  - [src/shared/types/addon.ts](/home/turtle/chroma/src/shared/types/addon.ts)
+  - [src/shared/types/web.ts](/home/turtle/chroma/src/shared/types/web.ts)
+  - [src/shared/types/index.ts](/home/turtle/chroma/src/shared/types/index.ts)
+- Updated addon repository reads and writes in:
+  - [src/server/addons/addonRepository.ts](/home/turtle/chroma/src/server/addons/addonRepository.ts)
+- Added central library listing service and route in:
+  - [src/server/addons/addonService.ts](/home/turtle/chroma/src/server/addons/addonService.ts)
+  - [src/server/addons/addonRoutes.ts](/home/turtle/chroma/src/server/addons/addonRoutes.ts)
+  - `GET /api/addons/library`
+- Added central CurseForge provider routes in:
+  - [src/server/addons/addonRoutes.ts](/home/turtle/chroma/src/server/addons/addonRoutes.ts)
+  - `GET /api/addons/providers/curseforge/status`
+  - `GET /api/addons/providers/curseforge/search`
+  - `POST /api/addons/providers/curseforge/download`
+- Updated the Addon Library Web UI to list central addon file records in:
+  - [src/web/src/api/chromaApi.ts](/home/turtle/chroma/src/web/src/api/chromaApi.ts)
+  - [src/web/src/pages/AddonLibraryPage.tsx](/home/turtle/chroma/src/web/src/pages/AddonLibraryPage.tsx)
+
+### Validation Notes
+
+- Ran `pnpm typecheck` successfully.
+- Ran `pnpm build` successfully.
+- Ran `pnpm build:web` successfully.
+- Ran `./dev/dev-run.sh -build` successfully; migration/backfill completed on the existing `.runtime` SQLite database.
+- Verified the migrated database had:
+  - central `addon_files` rows
+  - central `addon_file_packs` rows
+  - zero `instance_addons` rows missing `addon_file_id`
+  - zero `instance_addon_packs` rows missing `addon_file_pack_id`
+- Live CurseForge download/enable/disable was validated with `GSG's New Ores`:
+  - a new central `addon_files` row was created
+  - new instance registration linked to the central addon file through `addon_file_id`
+  - two instance pack rows linked to central pack rows through `addon_file_pack_id`
+  - central Addon Library service returned the new library item
+  - enable copied two packs into the selected instance's BDS pack folders
+  - disable removed the copied `chroma_*` pack folders
+  - central archive and extracted files remained after disable
+- Live central-only library download was validated with `Realms & Races | A D&D Inspired addon`:
+  - central `addon_files` row was created
+  - archive and extracted paths were under `.runtime/var/lib/chroma/downloads/addons`
+  - `registeredInstanceCount` was `0`
+  - `instance_addons` row count did not change
+
+### Status
+
+Completed on the current branch/worktree. Addon files and discovered packs are now centrally registered; instance rows represent registration and enablement state. The Addon Library browse/download UI no longer targets an instance.
 
 ## Phase 5: Provider-Aware Update Checks
 

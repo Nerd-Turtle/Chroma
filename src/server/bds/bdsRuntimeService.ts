@@ -13,6 +13,7 @@ import type { BdsLogFileSummary, BdsLogPage, BdsLogTail } from "./bdsLogService.
 import { getInstanceBdsLogPage, getInstanceCurrentBdsLogTail, listBdsLogFiles } from "./bdsLogService.js";
 
 const processManager = new BdsProcessManager();
+let runtimeStateSynchronizationInitialized = false;
 
 export class BdsStartupVerificationError extends Error {
   readonly runtime: BdsRuntimeState;
@@ -64,8 +65,12 @@ export async function getBdsRuntimeState(db: Database, instanceId: string): Prom
   }
 
   const runtimeState = processManager.getRuntimeState(instanceId);
+  if (processManager.hasRuntimeState(instanceId)) {
+    const nextStatus = mapRuntimeStateToInstanceStatus(runtimeState);
+    if (instance.status !== nextStatus) {
+      updateInstanceStatus(db, instanceId, nextStatus);
+    }
 
-  if (runtimeState.status !== "stopped") {
     return runtimeState;
   }
 
@@ -81,6 +86,40 @@ export async function getBdsRuntimeState(db: Database, instanceId: string): Prom
   }
 
   return runtimeState;
+}
+
+export function initializeBdsRuntimeStateSynchronization(db: Database, logger: FastifyBaseLogger): void {
+  if (runtimeStateSynchronizationInitialized) {
+    return;
+  }
+
+  runtimeStateSynchronizationInitialized = true;
+  processManager.subscribeToRuntimeState((runtimeState) => {
+    const instance = getInstance(db, runtimeState.instanceId);
+    if (!instance) {
+      return;
+    }
+
+    const nextStatus = mapRuntimeStateToInstanceStatus(runtimeState);
+    if (instance.status === nextStatus) {
+      return;
+    }
+
+    try {
+      updateInstanceStatus(db, runtimeState.instanceId, nextStatus);
+    } catch (error) {
+      logger.error(
+        {
+          instanceId: runtimeState.instanceId,
+          runtimeStatus: runtimeState.status,
+          desiredStatus: runtimeState.desiredStatus,
+          healthStatus: runtimeState.healthStatus,
+          error: error instanceof Error ? error.message : String(error),
+        },
+        "Failed to synchronize persisted BDS runtime state",
+      );
+    }
+  });
 }
 
 export async function setBdsMaintenanceState(

@@ -1,5 +1,5 @@
 import { mkdir, rm, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { randomUUID } from "node:crypto";
 import { getRuntimePaths } from "../config/paths.js";
 import { discoverBdsDownloadUrl, type BdsDiscoveryResult } from "./bdsDiscoveryService.js";
 
@@ -30,7 +30,7 @@ export async function downloadBdsZip(): Promise<BdsDownloadResult> {
 
   const downloadDir = getDownloadBasePath();
   await mkdir(downloadDir, { recursive: true });
-  const downloadPath = `${downloadDir}/${filename}`;
+  const downloadPath = `${downloadDir}/${randomUUID()}-${filename}`;
 
   const buffer = Buffer.from(await response.arrayBuffer());
   await writeFile(downloadPath, buffer);

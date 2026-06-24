@@ -1,7 +1,6 @@
 import type { Database } from "better-sqlite3";
-import type { AppSettings, DashboardSummary, SetupCompleteRequest, UpdateAppSettingsRequest, UserRecord } from "../../shared/types/index.js";
+import type { AppSettings, SetupCompleteRequest, UpdateAppSettingsRequest, UserRecord } from "../../shared/types/index.js";
 import { createId } from "../utils/createId.js";
-import { listInstances } from "../instances/instanceService.js";
 import { hashPassword } from "../auth/passwords.js";
 import { getUserByUsername, insertUser } from "../auth/userRepository.js";
 import { deleteAppSetting, getAppSetting, upsertAppSetting } from "./appSettingsRepository.js";
@@ -9,7 +8,9 @@ import { deleteAppSetting, getAppSetting, upsertAppSetting } from "./appSettings
 const SETUP_COMPLETE_KEY = "setup.complete";
 const TIMEZONE_KEY = "app.timezone";
 const LANGUAGE_KEY = "app.language";
+const NOTIFICATION_DURATION_SECONDS_KEY = "app.notification_duration_seconds";
 const CURSEFORGE_API_KEY_KEY = "providers.curseforge.api_key";
+const DEFAULT_NOTIFICATION_DURATION_SECONDS = 2;
 
 function normalizeOptionalSecret(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
@@ -36,9 +37,21 @@ export function getAppSettings(db: Database): AppSettings | undefined {
   return {
     timezone,
     language,
+    notificationDurationSeconds: getNotificationDurationSeconds(db),
     curseForgeApiKeyConfigured: Boolean(curseForgeApiKey),
     ...(curseForgeApiKey ? { curseForgeApiKeyLastFour: getLastFour(curseForgeApiKey) } : {}),
   };
+}
+
+function getNotificationDurationSeconds(db: Database): number {
+  const rawValue = getAppSetting(db, NOTIFICATION_DURATION_SECONDS_KEY);
+  const parsedValue = rawValue ? Number.parseInt(rawValue, 10) : Number.NaN;
+
+  if (!Number.isInteger(parsedValue) || parsedValue < 1 || parsedValue > 30) {
+    return DEFAULT_NOTIFICATION_DURATION_SECONDS;
+  }
+
+  return parsedValue;
 }
 
 export function getCurseForgeApiKey(db: Database): string | undefined {
@@ -67,6 +80,7 @@ export async function completeInitialSetup(db: Database, input: SetupCompleteReq
   insertUser(db, user);
   upsertAppSetting(db, TIMEZONE_KEY, input.timezone, now);
   upsertAppSetting(db, LANGUAGE_KEY, input.language, now);
+  upsertAppSetting(db, NOTIFICATION_DURATION_SECONDS_KEY, String(DEFAULT_NOTIFICATION_DURATION_SECONDS), now);
   const curseForgeApiKey = normalizeOptionalSecret(input.curseForgeApiKey);
   if (curseForgeApiKey) {
     upsertAppSetting(db, CURSEFORGE_API_KEY_KEY, curseForgeApiKey, now);
@@ -79,6 +93,7 @@ export function updateAppSettings(db: Database, input: UpdateAppSettingsRequest)
 
   upsertAppSetting(db, TIMEZONE_KEY, input.timezone, now);
   upsertAppSetting(db, LANGUAGE_KEY, input.language, now);
+  upsertAppSetting(db, NOTIFICATION_DURATION_SECONDS_KEY, String(input.notificationDurationSeconds), now);
 
   if (input.clearCurseForgeApiKey) {
     deleteAppSetting(db, CURSEFORGE_API_KEY_KEY);
@@ -95,18 +110,4 @@ export function updateAppSettings(db: Database, input: UpdateAppSettingsRequest)
   }
 
   return settings;
-}
-
-export function getDashboardSummary(db: Database): DashboardSummary {
-  const instances = listInstances(db);
-  const runningInstanceCount = instances.filter((instance) => instance.status === "running").length;
-  const stoppedInstanceCount = instances.filter((instance) => instance.status === "stopped").length;
-  const appSettings = getAppSettings(db);
-
-  return {
-    instanceCount: instances.length,
-    runningInstanceCount,
-    stoppedInstanceCount,
-    ...(appSettings ? { appSettings } : {}),
-  };
 }

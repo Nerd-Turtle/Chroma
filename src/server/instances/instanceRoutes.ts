@@ -5,11 +5,13 @@ import { createReadStream } from "node:fs";
 import { requireAuthenticated } from "../auth/authGuard.js";
 import {
   createInstance,
+  deleteInstance,
   getInstance,
   listInstances,
   updateInstance,
 } from "./instanceService.js";
 import { listRecentInstanceRuntimeEvents } from "./instanceRuntimeEventService.js";
+import { registerAddonRoutes } from "../addons/addonRoutes.js";
 import { registerBdsRoutes } from "../bds/bdsRoutes.js";
 import { registerInstanceSettingsRoutes } from "./instanceSettingsRoutes.js";
 import { createManagedExportBackupZip, getExportBackupRecord } from "./instanceBackupService.js";
@@ -156,6 +158,20 @@ export async function registerInstanceRoutes(app: FastifyInstance, db: Database)
       return { instance };
     });
 
+    protectedApp.delete("/api/instances/:instanceId", async (request, reply) => {
+      const params = request.params as { instanceId: string };
+
+      try {
+        await deleteInstance(db, params.instanceId);
+        return {
+          success: true,
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return reply.code(message === "Instance not found" ? 404 : 400).send({ error: message });
+      }
+    });
+
     protectedApp.post("/api/instances/:instanceId/backups/export", async (request, reply) => {
       const params = request.params as { instanceId: string };
 
@@ -191,5 +207,6 @@ export async function registerInstanceRoutes(app: FastifyInstance, db: Database)
 
     void registerBdsRoutes(protectedApp, db);
     void registerInstanceSettingsRoutes(protectedApp, db);
+    void registerAddonRoutes(protectedApp, db);
   });
 }

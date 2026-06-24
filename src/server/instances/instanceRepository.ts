@@ -165,3 +165,7 @@ export function updateInstanceLastCheck(
     `UPDATE instances SET last_check_at = ?, last_check_result = ?, updated_at = ? WHERE id = ?`
   ).run(checkedAt, result, new Date().toISOString(), instanceId);
 }
+
+export function deleteInstanceById(db: Database, instanceId: string): void {
+  db.prepare(`DELETE FROM instances WHERE id = ?`).run(instanceId);
+}

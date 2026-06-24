@@ -1,6 +1,21 @@
 export type { Instance, InstanceStatus, InstanceUpdateCheckFrequency, InstanceUpdateCheckWeekday } from "./instance.js";
 export type { InstanceRuntimeEvent, InstanceRuntimeEventCategory, InstanceRuntimeEventLevel } from "./runtimeEvent.js";
-export type { AddonSource, InstanceAddon, InstanceAddonStatus } from "./addon.js";
+export type {
+  AddonProvider,
+  AddonLibraryItem,
+  AddonLibraryLinkedInstance,
+  AddonUpdateSettings,
+  CurseForgeAddonProviderStatus,
+  CurseForgeAddonSearchPagination,
+  CurseForgeAddonSearchResult,
+  CurseForgeAddonSearchSort,
+  InstanceAddon,
+  InstanceAddonPack,
+  InstanceAddonPackCounts,
+  InstanceAddonPackStatus,
+  InstanceAddonPackType,
+  InstanceAddonStatus,
+} from "./addon.js";
 export type { Job, JobStatus } from "./job.js";
 export type { BdsInstall, BdsInstallStatus } from "./bds.js";
 export type { BdsConsoleLine, BdsConsoleSnapshot, BdsConsoleSource } from "./bdsConsole.js";
@@ -26,12 +41,30 @@ export type {
   AuthSessionResponse,
   LoginRequest,
   LoginResponse,
+  DashboardHealthSegment,
+  DashboardHealthSummary,
+  DashboardInstanceHealthCategory,
+  DashboardInstancePerformance,
   DashboardSummary,
+  DashboardSystemPerformance,
   CreateInstanceRequest,
   UpdateInstanceRequest,
   InstanceListResponse,
   InstanceDetailResponse,
   InstanceRuntimeEventsResponse,
+  AddonLibraryEditorResponse,
+  AddonLibraryListResponse,
+  AddonLibraryDownloadResponse,
+  AddonUpdateSettingsResponse,
+  InstanceAddonDetailResponse,
+  InstanceAddonListResponse,
+  UpdateInstanceAddonOrderRequest,
+  CurseForgeAddonProviderStatusResponse,
+  CurseForgeAddonDownloadRequest,
+  CurseForgeAddonSearchRequest,
+  CurseForgeAddonSearchResponse,
+  UpdateAddonLibraryLinksRequest,
+  UpdateAddonUpdateSettingsRequest,
   InstanceSettingsResponse,
   InstanceServerPropertiesResponse,
   InstanceBdsStatusResponse,

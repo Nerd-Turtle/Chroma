@@ -2,10 +2,10 @@ import type { AuthUser } from "../../../shared/types/index.js";
 
 type TopNavProps = {
   authenticated: boolean;
-  activePage: "setup" | "login" | "dashboard" | "instances" | "settings";
+  activePage: "setup" | "login" | "dashboard" | "instances" | "addon-library" | "settings";
   user: AuthUser | null;
   onLogout: () => void;
-  onNavigate: (page: "dashboard" | "instances" | "settings") => void;
+  onNavigate: (page: "dashboard" | "instances" | "addon-library" | "settings") => void;
 };
 
 const TopNav = ({ authenticated, activePage, user, onLogout, onNavigate }: TopNavProps) => {
@@ -35,7 +35,13 @@ const TopNav = ({ authenticated, activePage, user, onLogout, onNavigate }: TopNa
           >
             Instances
           </button>
-          <span className="nav-link muted">Addons</span>
+          <button
+            type="button"
+            className={activePage === "addon-library" ? "nav-link active" : "nav-link"}
+            onClick={() => onNavigate("addon-library")}
+          >
+            Addon Library
+          </button>
           <button
             type="button"
             className={activePage === "settings" ? "nav-link active" : "nav-link"}
