@@ -419,7 +419,7 @@ Suggested endpoints:
 - `GET /api/instances/:instanceId/addons/providers/curseforge/status`
   - whether CurseForge is configured and which IDs were resolved
 - `GET /api/instances/:instanceId/addons/providers/curseforge/search`
-  - query params: `q`, `sort`, `page`, `pageSize`, `gameVersion`
+  - query params: `q`, `sort`, `page`, `pageSize`, `gameVersion`, `authorId`
 - `POST /api/instances/:instanceId/addons/providers/curseforge/download`
   - body: `projectId`, `fileId`
 - `POST /api/instances/:instanceId/addons/:addonId/enable`
@@ -471,6 +471,7 @@ The CurseForge browse UI should include:
 - sort menu
 - optional game version filter defaulted from the instance BDS version when known
 - results table/list with name, author, downloads, updated date, rating if available
+- author names can filter results with provider-side `authorId` while showing a readable `author: Name` search value
 - Download action
 
 Keep the UI operational and compact. This is an instance management workspace, not a marketing page.

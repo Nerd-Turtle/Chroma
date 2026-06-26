@@ -53,7 +53,9 @@ export type CurseForgeMod = {
     url?: string;
   };
   authors?: Array<{
+    id: number;
     name: string;
+    url?: string;
   }>;
   mainFileId?: number;
   latestFiles?: CurseForgeModFile[];
@@ -74,6 +76,7 @@ export type CurseForgeSearchModsInput = {
   index: number;
   pageSize: number;
   gameVersion?: string;
+  authorId?: number;
 };
 
 const CURSEFORGE_BASE_URL = "https://api.curseforge.com";
@@ -116,6 +119,7 @@ export class CurseForgeClient {
       pageSize: String(input.pageSize),
       ...(input.searchFilter ? { searchFilter: input.searchFilter } : {}),
       ...(input.gameVersion ? { gameVersion: input.gameVersion } : {}),
+      ...(input.authorId ? { authorId: String(input.authorId) } : {}),
     });
 
     return {

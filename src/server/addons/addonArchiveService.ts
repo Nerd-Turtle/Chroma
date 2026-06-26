@@ -41,7 +41,7 @@ function stripJsonComments(json: string): string {
   let inBlockComment = false;
 
   for (let index = 0; index < json.length; index += 1) {
-    const character = json[index];
+    const character = json[index] ?? "";
     const nextCharacter = json[index + 1];
 
     if (inLineComment) {
@@ -96,6 +96,61 @@ function stripJsonComments(json: string): string {
   }
 
   return result;
+}
+
+function extractLeadingJsonObject(json: string): string | undefined {
+  let inString = false;
+  let escaped = false;
+  let startIndex = -1;
+  let depth = 0;
+
+  for (let index = 0; index < json.length; index += 1) {
+    const character = json[index] ?? "";
+
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (character === "\\") {
+        escaped = true;
+      } else if (character === "\"") {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (character === "\"") {
+      inString = true;
+      continue;
+    }
+
+    if (startIndex === -1) {
+      if (/\s/.test(character)) {
+        continue;
+      }
+
+      if (character !== "{") {
+        return undefined;
+      }
+
+      startIndex = index;
+      depth = 1;
+      continue;
+    }
+
+    if (character === "{") {
+      depth += 1;
+      continue;
+    }
+
+    if (character === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        return json.slice(startIndex, index + 1);
+      }
+    }
+  }
+
+  return undefined;
 }
 
 function makeSafePath(targetDir: string, entryPath: string): string {
@@ -252,6 +307,15 @@ function shouldIgnoreManifestError(manifestPath: string): boolean {
 }
 
 function parseVersion(value: unknown): number[] | undefined {
+  if (typeof value === "string") {
+    const parts = value.split(".");
+    if (parts.length !== 3 || !parts.every((part) => /^\d+$/.test(part))) {
+      return undefined;
+    }
+
+    return parts.map((part) => Number.parseInt(part, 10));
+  }
+
   if (!Array.isArray(value) || value.length !== 3) {
     return undefined;
   }
@@ -282,12 +346,25 @@ function classifyPackType(manifest: BedrockManifest): InstanceAddonPackType {
 
 async function parseManifest(manifestPath: string): Promise<DiscoveredAddonPack> {
   const manifestJson = await readFile(manifestPath, "utf8");
+  const normalizedManifestJson = stripJsonComments(manifestJson.replace(/^\uFEFF/, ""));
+  let persistedManifestJson = normalizedManifestJson;
   let manifest: BedrockManifest;
   try {
-    manifest = JSON.parse(stripJsonComments(manifestJson.replace(/^\uFEFF/, ""))) as BedrockManifest;
+    manifest = JSON.parse(normalizedManifestJson) as BedrockManifest;
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`Pack manifest is not valid JSON: ${manifestPath}: ${message}`);
+    const recoveredManifestJson = extractLeadingJsonObject(normalizedManifestJson);
+    if (!recoveredManifestJson) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`Pack manifest is not valid JSON: ${manifestPath}: ${message}`);
+    }
+
+    try {
+      manifest = JSON.parse(recoveredManifestJson) as BedrockManifest;
+      persistedManifestJson = recoveredManifestJson;
+    } catch {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`Pack manifest is not valid JSON: ${manifestPath}: ${message}`);
+    }
   }
   const headerUuid = typeof manifest.header?.uuid === "string" ? manifest.header.uuid : "";
   const headerVersion = parseVersion(manifest.header?.version);
@@ -297,7 +374,7 @@ async function parseManifest(manifestPath: string): Promise<DiscoveredAddonPack>
   }
 
   if (!headerVersion) {
-    throw new Error(`Pack manifest is missing a valid three-part header.version: ${manifestPath}`);
+    throw new Error(`Pack manifest is missing a valid three-part header.version array or dotted string: ${manifestPath}`);
   }
 
   const packType = classifyPackType(manifest);
@@ -307,7 +384,7 @@ async function parseManifest(manifestPath: string): Promise<DiscoveredAddonPack>
     headerUuid,
     headerVersion,
     sourcePath: dirname(manifestPath),
-    manifestJson,
+    manifestJson: persistedManifestJson,
   };
 
   if (typeof manifest.header?.name === "string") pack.name = manifest.header.name;

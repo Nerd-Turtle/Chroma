@@ -686,6 +686,29 @@ h2 {
   outline: none;
 }
 
+.addon-author-link {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: #9fd7ff;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.addon-author-link:hover,
+.addon-author-link:focus-visible {
+  text-decoration: underline;
+  text-decoration-color: var(--chrome-active);
+  text-underline-offset: 0.18rem;
+  outline: none;
+}
+
+.addon-author-link:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
 .addon-library-table-header,
 .addon-library-table-row {
   display: grid;

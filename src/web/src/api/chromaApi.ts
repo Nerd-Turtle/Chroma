@@ -265,6 +265,7 @@ export async function searchCurseForgeAddons(
   if (payload.page) params.set("page", String(payload.page));
   if (payload.pageSize) params.set("pageSize", String(payload.pageSize));
   if (payload.gameVersion) params.set("gameVersion", payload.gameVersion);
+  if (payload.authorId) params.set("authorId", String(payload.authorId));
 
   const query = params.toString();
   const response = await fetch(
@@ -282,6 +283,7 @@ export async function searchLibraryCurseForgeAddons(
   if (payload.page) params.set("page", String(payload.page));
   if (payload.pageSize) params.set("pageSize", String(payload.pageSize));
   if (payload.gameVersion) params.set("gameVersion", payload.gameVersion);
+  if (payload.authorId) params.set("authorId", String(payload.authorId));
 
   const query = params.toString();
   const response = await fetch(`/api/addons/providers/curseforge/search${query ? `?${query}` : ""}`);

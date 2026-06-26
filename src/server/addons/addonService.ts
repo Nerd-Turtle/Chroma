@@ -22,6 +22,8 @@ import {
   listAddonLibraryLinkedInstances,
   listInstanceAddonPacks,
   listInstanceAddons,
+  markAddonFileRecovered,
+  saveAddonFilePacks,
   saveAddonFileWithPacks,
   saveInstanceAddonWithPacks,
   updateInstanceAddonAutoUpdate,
@@ -35,8 +37,76 @@ import type { DiscoveredAddonPack } from "./addonArchiveService.js";
 import { CurseForgeClient, type CurseForgeMod } from "./curseForgeClient.js";
 import { getCurseForgeAddonStoragePaths } from "./addonStoragePaths.js";
 
-export function listAddonLibrary(_db: Database): AddonLibraryItem[] {
-  return listAddonFiles(_db);
+function getTotalPackCount(addonFile: AddonLibraryItem): number {
+  return addonFile.packCounts.behavior + addonFile.packCounts.resource + addonFile.packCounts.skin + addonFile.packCounts.unknown;
+}
+
+function mapDiscoveredAddonFilePack(addonFileId: string, pack: DiscoveredAddonPack, now: string): SaveAddonFilePackInput {
+  const savedPack: SaveAddonFilePackInput = {
+    id: createId("afpack"),
+    addonFileId,
+    packType: pack.packType,
+    headerUuid: pack.headerUuid,
+    headerVersionJson: JSON.stringify(pack.headerVersion),
+    sourcePath: pack.sourcePath,
+    manifestJson: pack.manifestJson,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  if (pack.name) savedPack.name = pack.name;
+  if (pack.description) savedPack.description = pack.description;
+  if (pack.minEngineVersion) savedPack.minEngineVersionJson = JSON.stringify(pack.minEngineVersion);
+
+  return savedPack;
+}
+
+async function repairAddonLibraryFileIfNeeded(db: Database, addonFileId: string): Promise<AddonLibraryItem> {
+  const addonFile = getAddonFile(db, addonFileId);
+  if (!addonFile) {
+    throw new Error("Addon not found");
+  }
+
+  if (getTotalPackCount(addonFile) > 0) {
+    if (addonFile.error) {
+      const now = new Date().toISOString();
+      markAddonFileRecovered(db, addonFile.id, now);
+      return getAddonFile(db, addonFileId) ?? addonFile;
+    }
+
+    return addonFile;
+  }
+
+  if (!addonFile.archivePath || !addonFile.extractedPath) {
+    return addonFile;
+  }
+
+  const discoveredPacks = await inspectAddonArchive(addonFile.archivePath, addonFile.extractedPath);
+  if (discoveredPacks.length === 0) {
+    return addonFile;
+  }
+
+  const now = new Date().toISOString();
+  const packs = discoveredPacks.map((pack) => mapDiscoveredAddonFilePack(addonFile.id, pack, now));
+  saveAddonFilePacks(db, addonFile.id, packs);
+  markAddonFileRecovered(db, addonFile.id, now);
+
+  return getAddonFile(db, addonFileId) ?? addonFile;
+}
+
+export async function listAddonLibrary(db: Database): Promise<AddonLibraryItem[]> {
+  const addons = listAddonFiles(db);
+  const repairedAddons: AddonLibraryItem[] = [];
+
+  for (const addon of addons) {
+    if (getTotalPackCount(addon) === 0 && addon.archivePath && addon.extractedPath) {
+      repairedAddons.push(await repairAddonLibraryFileIfNeeded(db, addon.id));
+    } else {
+      repairedAddons.push(addon);
+    }
+  }
+
+  return repairedAddons;
 }
 
 function buildInstanceAddonFromLibraryFile(
@@ -78,13 +148,14 @@ function buildInstanceAddonFromLibraryFile(
   return addon;
 }
 
-function buildInstanceAddonPacksFromLibraryFile(
+async function buildInstanceAddonPacksFromLibraryFile(
   db: Database,
   addonFileId: string,
   instanceId: string,
   addonId: string,
   now: string,
-): SaveInstanceAddonPackInput[] {
+): Promise<SaveInstanceAddonPackInput[]> {
+  await repairAddonLibraryFileIfNeeded(db, addonFileId);
   return listAddonFilePacks(db, addonFileId).map((pack) => ({
     id: createId("pack"),
     instanceId,
@@ -149,11 +220,11 @@ export function listAddonsForInstance(db: Database, instanceId: string): Instanc
   return listInstanceAddons(db, instanceId);
 }
 
-export function getAddonDetailForInstance(
+export async function getAddonDetailForInstance(
   db: Database,
   instanceId: string,
   addonId: string,
-): { addon: InstanceAddon; packs: InstanceAddonPack[] } {
+): Promise<{ addon: InstanceAddon; packs: InstanceAddonPack[] }> {
   const instance = getInstance(db, instanceId);
   if (!instance) {
     throw new Error("Instance not found");
@@ -164,20 +235,19 @@ export function getAddonDetailForInstance(
     throw new Error("Addon not found");
   }
 
+  await repairAddonLibraryFileIfNeeded(db, addon.addonFileId);
+
   return {
     addon,
     packs: listInstanceAddonPacks(db, instanceId, addonId),
   };
 }
 
-export function getAddonLibraryEditor(
+export async function getAddonLibraryEditor(
   db: Database,
   addonFileId: string,
-): { addon: AddonLibraryItem; instances: AddonLibraryLinkedInstance[] } {
-  const addon = getAddonFile(db, addonFileId);
-  if (!addon) {
-    throw new Error("Addon not found");
-  }
+): Promise<{ addon: AddonLibraryItem; instances: AddonLibraryLinkedInstance[] }> {
+  const addon = await repairAddonLibraryFileIfNeeded(db, addonFileId);
 
   return {
     addon,
@@ -185,15 +255,12 @@ export function getAddonLibraryEditor(
   };
 }
 
-export function updateAddonLibraryLinks(
+export async function updateAddonLibraryLinks(
   db: Database,
   addonFileId: string,
   links: Array<{ instanceId: string; autoUpdateEnabled: boolean }>,
-): { addon: AddonLibraryItem; instances: AddonLibraryLinkedInstance[] } {
-  const addonFile = getAddonFile(db, addonFileId);
-  if (!addonFile) {
-    throw new Error("Addon not found");
-  }
+): Promise<{ addon: AddonLibraryItem; instances: AddonLibraryLinkedInstance[] }> {
+  const addonFile = await repairAddonLibraryFileIfNeeded(db, addonFileId);
 
   const uniqueLinks = new Map<string, boolean>();
   for (const link of links) {
@@ -269,19 +336,19 @@ export function updateAddonLibraryLinks(
     const addonId = createId("addon");
     const sortOrder = getNextInstanceAddonSortOrder(db, instanceId);
     const addon = buildInstanceAddonFromLibraryFile(addonFile, instanceId, now, autoUpdateEnabled, sortOrder, addonId);
-    const packs = buildInstanceAddonPacksFromLibraryFile(db, addonFile.id, instanceId, addonId, now);
+    const packs = await buildInstanceAddonPacksFromLibraryFile(db, addonFile.id, instanceId, addonId, now);
 
     saveInstanceAddonWithPacks(db, addon, packs);
   }
 
-  return getAddonLibraryEditor(db, addonFileId);
+  return await getAddonLibraryEditor(db, addonFileId);
 }
 
-export function selectLibraryAddonsForInstance(
+export async function selectLibraryAddonsForInstance(
   db: Database,
   instanceId: string,
   addonFileIds: string[],
-): { addons: InstanceAddon[] } {
+): Promise<{ addons: InstanceAddon[] }> {
   const instance = getInstance(db, instanceId);
   if (!instance) {
     throw new Error("Instance not found");
@@ -330,7 +397,7 @@ export function selectLibraryAddonsForInstance(
     const addonId = existingAddon?.id ?? createId("addon");
     const sortOrder = existingAddon?.sortOrder ?? getNextInstanceAddonSortOrder(db, instanceId);
     const addon = buildInstanceAddonFromLibraryFile(addonFile, instanceId, now, true, sortOrder, addonId);
-    const packs = buildInstanceAddonPacksFromLibraryFile(db, addonFile.id, instanceId, addonId, now);
+    const packs = await buildInstanceAddonPacksFromLibraryFile(db, addonFile.id, instanceId, addonId, now);
 
     saveInstanceAddonWithPacks(db, addon, packs);
   }
@@ -406,7 +473,11 @@ function mapModToSearchResult(mod: CurseForgeMod, fileId: number): CurseForgeAdd
     name: mod.name,
     slug: mod.slug,
     summary: mod.summary,
-    authors: mod.authors?.map((author) => author.name) ?? [],
+    authors: mod.authors?.map((author) => ({
+      id: author.id,
+      name: author.name,
+      ...(author.url ? { url: author.url } : {}),
+    })) ?? [],
     downloadCount: mod.downloadCount,
     latestGameVersions: latestFile?.gameVersions ?? [],
   };
@@ -437,7 +508,7 @@ export async function downloadCurseForgeAddonForInstance(
 
   const existingAddon = getInstanceAddonByProviderFile(db, instanceId, "curseforge", String(input.projectId), String(input.fileId));
   if (existingAddon) {
-    return getAddonDetailForInstance(db, instanceId, existingAddon.id);
+    return await getAddonDetailForInstance(db, instanceId, existingAddon.id);
   }
 
   const { mod, file, paths, error, discoveredPacks } = await fetchCurseForgeAddonFile(db, input);
@@ -518,7 +589,7 @@ export async function downloadCurseForgeAddonForInstance(
     },
   });
 
-  return getAddonDetailForInstance(db, instanceId, addonId);
+  return await getAddonDetailForInstance(db, instanceId, addonId);
 }
 
 export async function downloadCurseForgeAddonToLibrary(
@@ -558,25 +629,7 @@ export async function downloadCurseForgeAddonToLibrary(
   if (file.fileDate) addon.fileDate = file.fileDate;
   addon.downloadCount = file.downloadCount ?? mod.downloadCount;
 
-  const packs: SaveAddonFilePackInput[] = discoveredPacks.map((pack) => {
-    const savedPack: SaveAddonFilePackInput = {
-      id: createId("afpack"),
-      addonFileId: addon.id,
-      packType: pack.packType,
-      headerUuid: pack.headerUuid,
-      headerVersionJson: JSON.stringify(pack.headerVersion),
-      sourcePath: pack.sourcePath,
-      manifestJson: pack.manifestJson,
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    if (pack.name) savedPack.name = pack.name;
-    if (pack.description) savedPack.description = pack.description;
-    if (pack.minEngineVersion) savedPack.minEngineVersionJson = JSON.stringify(pack.minEngineVersion);
-
-    return savedPack;
-  });
+  const packs: SaveAddonFilePackInput[] = discoveredPacks.map((pack) => mapDiscoveredAddonFilePack(addon.id, pack, now));
 
   saveAddonFileWithPacks(db, addon, packs);
 

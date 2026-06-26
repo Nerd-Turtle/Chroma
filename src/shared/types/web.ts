@@ -202,6 +202,7 @@ export type CurseForgeAddonSearchRequest = {
   page?: number;
   pageSize?: number;
   gameVersion?: string;
+  authorId?: number;
 };
 
 export type CurseForgeAddonDownloadRequest = {

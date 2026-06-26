@@ -2,6 +2,7 @@ import { ArrowDownToLine, CheckCircle2, ChevronLeft, ChevronRight, LoaderCircle,
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import type {
   CurseForgeAddonProviderStatus,
+  CurseForgeAddonSearchAuthor,
   CurseForgeAddonSearchPagination,
   CurseForgeAddonSearchResult,
   CurseForgeAddonSearchSort,
@@ -26,6 +27,8 @@ type CurseForgeSearchState = {
   results: CurseForgeAddonSearchResult[];
   pagination: CurseForgeAddonSearchPagination | null;
 };
+
+type ActiveAuthorFilter = Pick<CurseForgeAddonSearchAuthor, "id" | "name">;
 
 type BannerTone = "info" | "warning" | "error";
 
@@ -77,6 +80,10 @@ function formatCurseForgeSort(value: CurseForgeAddonSearchSort): string {
   }
 }
 
+function getAuthorSearchText(author: ActiveAuthorFilter): string {
+  return `author: ${author.name}`;
+}
+
 function compareGameVersions(left: string, right: string): number {
   const leftParts = left.split(".").map((part) => Number.parseInt(part, 10));
   const rightParts = right.split(".").map((part) => Number.parseInt(part, 10));
@@ -123,6 +130,7 @@ const AddonLibraryPage = () => {
   const [providerStatus, setProviderStatus] = useState<CurseForgeAddonProviderStatus | null>(null);
   const [providerLoading, setProviderLoading] = useState(false);
   const [query, setQuery] = useState("");
+  const [activeAuthorFilter, setActiveAuthorFilter] = useState<ActiveAuthorFilter | null>(null);
   const [sort, setSort] = useState<CurseForgeAddonSearchSort>("popularity");
   const [search, setSearch] = useState<CurseForgeSearchState>({ results: [], pagination: null });
   const [searching, setSearching] = useState(false);
@@ -250,7 +258,10 @@ const AddonLibraryPage = () => {
     }
   }, [search.pagination?.page]);
 
-  async function runSearch(page: number) {
+  async function runSearch(
+    page: number,
+    nextSearch?: { query: string; authorFilter: ActiveAuthorFilter | null },
+  ) {
     if (!canBrowse) {
       return;
     }
@@ -260,8 +271,10 @@ const AddonLibraryPage = () => {
     setBanner(null);
 
     try {
+      const searchQuery = nextSearch?.query ?? query;
+      const authorFilter = nextSearch ? nextSearch.authorFilter : activeAuthorFilter;
       const result = await searchLibraryCurseForgeAddons({
-        q: query,
+        ...(authorFilter ? { authorId: authorFilter.id } : { q: searchQuery }),
         sort,
         page,
         pageSize: CURSEFORGE_SEARCH_PAGE_SIZE,
@@ -290,6 +303,15 @@ const AddonLibraryPage = () => {
   async function handleSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     await runSearch(1);
+  }
+
+  async function handleAuthorFilter(author: CurseForgeAddonSearchAuthor) {
+    const authorFilter = { id: author.id, name: author.name };
+    const authorQuery = getAuthorSearchText(authorFilter);
+
+    setActiveAuthorFilter(authorFilter);
+    setQuery(authorQuery);
+    await runSearch(1, { query: authorQuery, authorFilter });
   }
 
   async function handleDownload(result: CurseForgeAddonSearchResult) {
@@ -567,7 +589,10 @@ const AddonLibraryPage = () => {
               <input
                 type="search"
                 value={query}
-                onChange={(event) => setQuery(event.target.value)}
+                onChange={(event) => {
+                  setQuery(event.target.value);
+                  setActiveAuthorFilter(null);
+                }}
                 placeholder="Name or keyword"
                 disabled={!canBrowse || searching}
               />
@@ -681,7 +706,24 @@ const AddonLibraryPage = () => {
                         <small>{result.summary}</small>
                       </span>
                     </span>
-                    <span role="cell">{result.authors.join(", ") || "Unknown"}</span>
+                    <span className="addon-author-list" role="cell">
+                      {result.authors.length > 0
+                        ? result.authors.map((author, index) => (
+                            <span key={`${author.id}:${author.name}`}>
+                              {index > 0 ? ", " : null}
+                              <button
+                                type="button"
+                                className="addon-author-link"
+                                onClick={() => void handleAuthorFilter(author)}
+                                disabled={!canBrowse || searching}
+                                title={`Show addons by ${author.name}`}
+                              >
+                                {author.name}
+                              </button>
+                            </span>
+                          ))
+                        : "Unknown"}
+                    </span>
                     <span role="cell">{formatNumber(result.downloadCount)}</span>
                     <span role="cell">{getLatestSupportedGameVersion(result.latestGameVersions)}</span>
                     <span role="cell">{result.latestFileDate ? formatTimestamp(result.latestFileDate) : "Unknown"}</span>

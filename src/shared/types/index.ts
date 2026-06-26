@@ -6,6 +6,7 @@ export type {
   AddonLibraryLinkedInstance,
   AddonUpdateSettings,
   CurseForgeAddonProviderStatus,
+  CurseForgeAddonSearchAuthor,
   CurseForgeAddonSearchPagination,
   CurseForgeAddonSearchResult,
   CurseForgeAddonSearchSort,

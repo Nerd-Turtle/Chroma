@@ -267,7 +267,7 @@ export async function enableAddonForInstance(db: Database, instanceId: string, a
 
   await ensureCanChangeAddons(db, instanceId);
 
-  const detail = getAddonDetailForInstance(db, instanceId, addonId);
+  const detail = await getAddonDetailForInstance(db, instanceId, addonId);
   if (detail.addon.status === "error") {
     throw new Error("Addon cannot be enabled because it is in an error state.");
   }
@@ -331,7 +331,7 @@ export async function enableAddonForInstance(db: Database, instanceId: string, a
     },
   });
 
-  return getAddonDetailForInstance(db, instanceId, addonId);
+  return await getAddonDetailForInstance(db, instanceId, addonId);
 }
 
 export async function disableAddonForInstance(db: Database, instanceId: string, addonId: string) {
@@ -342,7 +342,7 @@ export async function disableAddonForInstance(db: Database, instanceId: string, 
 
   await ensureCanChangeAddons(db, instanceId);
 
-  const detail = getAddonDetailForInstance(db, instanceId, addonId);
+  const detail = await getAddonDetailForInstance(db, instanceId, addonId);
   const enabledPacks = detail.packs.filter((pack) => pack.status === "enabled");
   if (enabledPacks.length === 0) {
     throw new Error("Addon has no enabled packs.");
@@ -395,7 +395,7 @@ export async function disableAddonForInstance(db: Database, instanceId: string, 
     },
   });
 
-  return getAddonDetailForInstance(db, instanceId, addonId);
+  return await getAddonDetailForInstance(db, instanceId, addonId);
 }
 
 export async function reorderAddonsForInstance(

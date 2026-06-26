@@ -377,6 +377,128 @@ export function listAddonFilePacks(db: Database, addonFileId: string): SaveAddon
   });
 }
 
+export function saveAddonFilePacks(db: Database, addonFileId: string, packs: SaveAddonFilePackInput[]): void {
+  const save = db.transaction(() => {
+    const findExistingPackByExactType = db.prepare(
+      `SELECT id
+      FROM addon_file_packs
+      WHERE addon_file_id = ?
+        AND pack_type = ?
+        AND header_uuid = ?
+        AND header_version_json = ?
+        AND source_path = ?`,
+    );
+    const findExistingPackByIdentity = db.prepare(
+      `SELECT id
+      FROM addon_file_packs
+      WHERE addon_file_id = ?
+        AND header_uuid = ?
+        AND header_version_json = ?
+        AND source_path = ?`,
+    );
+    const updatePack = db.prepare(
+      `UPDATE addon_file_packs
+      SET pack_type = @pack_type,
+        name = @name,
+        description = @description,
+        min_engine_version_json = @min_engine_version_json,
+        manifest_json = @manifest_json,
+        updated_at = @updated_at
+      WHERE id = @id`,
+    );
+    const insertPack = db.prepare(
+      `INSERT INTO addon_file_packs (
+        id,
+        addon_file_id,
+        pack_type,
+        name,
+        description,
+        header_uuid,
+        header_version_json,
+        min_engine_version_json,
+        source_path,
+        manifest_json,
+        created_at,
+        updated_at
+      ) VALUES (
+        @id,
+        @addon_file_id,
+        @pack_type,
+        @name,
+        @description,
+        @header_uuid,
+        @header_version_json,
+        @min_engine_version_json,
+        @source_path,
+        @manifest_json,
+        @created_at,
+        @updated_at
+      )`,
+    );
+
+    for (const pack of packs) {
+      const existingPack =
+        (findExistingPackByExactType.get(
+          addonFileId,
+          pack.packType,
+          pack.headerUuid,
+          pack.headerVersionJson,
+          pack.sourcePath,
+        ) as { id: string } | undefined) ??
+        (findExistingPackByIdentity.get(
+          addonFileId,
+          pack.headerUuid,
+          pack.headerVersionJson,
+          pack.sourcePath,
+        ) as { id: string } | undefined);
+      const persistedPackId = existingPack?.id ?? pack.id;
+      const persistedPack = {
+        id: persistedPackId,
+        addon_file_id: addonFileId,
+        pack_type: pack.packType,
+        name: pack.name ?? null,
+        description: pack.description ?? null,
+        header_uuid: pack.headerUuid,
+        header_version_json: pack.headerVersionJson,
+        min_engine_version_json: pack.minEngineVersionJson ?? null,
+        source_path: pack.sourcePath,
+        manifest_json: pack.manifestJson ?? null,
+        created_at: pack.createdAt,
+        updated_at: pack.updatedAt,
+      };
+
+      if (existingPack) {
+        updatePack.run(persistedPack);
+      } else {
+        insertPack.run(persistedPack);
+      }
+    }
+  });
+
+  save();
+}
+
+export function markAddonFileRecovered(db: Database, addonFileId: string, updatedAt: string): void {
+  const update = db.transaction(() => {
+    db.prepare(
+      `UPDATE addon_files
+        SET error = NULL,
+            updated_at = ?
+        WHERE id = ?`,
+    ).run(updatedAt, addonFileId);
+
+    db.prepare(
+      `UPDATE instance_addons
+        SET status = CASE WHEN status = 'error' THEN 'downloaded' ELSE status END,
+            error = NULL,
+            updated_at = ?
+        WHERE addon_file_id = ?`,
+    ).run(updatedAt, addonFileId);
+  });
+
+  update();
+}
+
 export function listAddonLibraryLinkedInstances(db: Database, addonFileId: string): AddonLibraryLinkedInstance[] {
   const rows = db.prepare(
     `SELECT

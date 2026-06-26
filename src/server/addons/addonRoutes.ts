@@ -32,7 +32,7 @@ export async function registerAddonRoutes(app: FastifyInstance, db: Database): P
   app.get("/api/addons/library", async (_request, reply) => {
     try {
       return {
-        addons: listAddonLibrary(db),
+        addons: await listAddonLibrary(db),
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -116,7 +116,7 @@ export async function registerAddonRoutes(app: FastifyInstance, db: Database): P
     const params = request.params as { addonFileId: string };
 
     try {
-      return getAddonLibraryEditor(db, params.addonFileId);
+      return await getAddonLibraryEditor(db, params.addonFileId);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       return reply.code(getStatusCodeForMessage(message)).send({ error: message });
@@ -143,7 +143,7 @@ export async function registerAddonRoutes(app: FastifyInstance, db: Database): P
     }
 
     try {
-      return updateAddonLibraryLinks(
+      return await updateAddonLibraryLinks(
         db,
         params.addonFileId,
         body.links as Array<{ instanceId: string; autoUpdateEnabled: boolean }>,
@@ -172,6 +172,7 @@ export async function registerAddonRoutes(app: FastifyInstance, db: Database): P
       page?: string;
       pageSize?: string;
       gameVersion?: string;
+      authorId?: string;
     };
 
     try {
@@ -181,6 +182,7 @@ export async function registerAddonRoutes(app: FastifyInstance, db: Database): P
         ...(typeof query.page === "string" ? { page: Number.parseInt(query.page, 10) } : {}),
         ...(typeof query.pageSize === "string" ? { pageSize: Number.parseInt(query.pageSize, 10) } : {}),
         ...(typeof query.gameVersion === "string" ? { gameVersion: query.gameVersion } : {}),
+        ...(typeof query.authorId === "string" ? { authorId: Number.parseInt(query.authorId, 10) } : {}),
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -231,7 +233,7 @@ export async function registerAddonRoutes(app: FastifyInstance, db: Database): P
     }
 
     try {
-      return selectLibraryAddonsForInstance(db, params.instanceId, body.addonFileIds);
+      return await selectLibraryAddonsForInstance(db, params.instanceId, body.addonFileIds);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       return reply.code(getStatusCodeForMessage(message)).send({ error: message });
@@ -287,6 +289,7 @@ export async function registerAddonRoutes(app: FastifyInstance, db: Database): P
       page?: string;
       pageSize?: string;
       gameVersion?: string;
+      authorId?: string;
     };
 
     try {
@@ -297,6 +300,7 @@ export async function registerAddonRoutes(app: FastifyInstance, db: Database): P
         ...(typeof query.page === "string" ? { page: Number.parseInt(query.page, 10) } : {}),
         ...(typeof query.pageSize === "string" ? { pageSize: Number.parseInt(query.pageSize, 10) } : {}),
         ...(typeof query.gameVersion === "string" ? { gameVersion: query.gameVersion } : {}),
+        ...(typeof query.authorId === "string" ? { authorId: Number.parseInt(query.authorId, 10) } : {}),
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -330,7 +334,7 @@ export async function registerAddonRoutes(app: FastifyInstance, db: Database): P
     const params = request.params as { instanceId: string; addonId: string };
 
     try {
-      return getAddonDetailForInstance(db, params.instanceId, params.addonId);
+      return await getAddonDetailForInstance(db, params.instanceId, params.addonId);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       return reply.code(getStatusCodeForMessage(message)).send({ error: message });

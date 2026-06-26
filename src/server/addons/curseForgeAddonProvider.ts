@@ -49,6 +49,14 @@ function normalizePageSize(value: number | undefined): number {
   return Math.min(value, MAX_PAGE_SIZE);
 }
 
+function normalizeAuthorId(value: number | undefined): number | undefined {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 1) {
+    return undefined;
+  }
+
+  return value;
+}
+
 function mapSortField(sort: CurseForgeAddonSearchSort | undefined): number {
   switch (sort ?? DEFAULT_SORT) {
     case "relevance":
@@ -155,7 +163,11 @@ function mapSearchResult(mod: CurseForgeMod): CurseForgeAddonSearchResult {
     name: mod.name,
     slug: mod.slug,
     summary: mod.summary,
-    authors: mod.authors?.map((author) => author.name) ?? [],
+    authors: mod.authors?.map((author) => ({
+      id: author.id,
+      name: author.name,
+      ...(author.url ? { url: author.url } : {}),
+    })) ?? [],
     downloadCount: mod.downloadCount,
     latestGameVersions: latestFile?.gameVersions ?? [],
   };
@@ -217,6 +229,7 @@ export async function searchCurseForgeAddons(
   const client = new CurseForgeClient(apiKey);
   const searchFilter = normalizeSearchText(input.q);
   const gameVersion = normalizeSearchText(input.gameVersion);
+  const authorId = normalizeAuthorId(input.authorId);
   const result = await client.searchMods({
     gameId: discovery.resolved.game.id,
     classId: discovery.resolved.addonClass.id,
@@ -226,6 +239,7 @@ export async function searchCurseForgeAddons(
     pageSize,
     ...(searchFilter ? { searchFilter } : {}),
     ...(gameVersion ? { gameVersion } : {}),
+    ...(authorId ? { authorId } : {}),
   });
 
   return {

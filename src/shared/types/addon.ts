@@ -102,6 +102,12 @@ export type CurseForgeAddonProviderStatus = {
   message?: string;
 };
 
+export type CurseForgeAddonSearchAuthor = {
+  id: number;
+  name: string;
+  url?: string;
+};
+
 export type CurseForgeAddonSearchResult = {
   projectId: number;
   name: string;
@@ -109,7 +115,7 @@ export type CurseForgeAddonSearchResult = {
   summary: string;
   websiteUrl?: string;
   logoUrl?: string;
-  authors: string[];
+  authors: CurseForgeAddonSearchAuthor[];
   downloadCount: number;
   latestFileId?: number;
   latestFileName?: string;
