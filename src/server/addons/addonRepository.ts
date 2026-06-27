@@ -791,6 +791,11 @@ export function saveAddonFileWithPacks(
       throw new Error("Failed to save addon file record.");
     }
 
+    if (downloads.length > 0) {
+      db.prepare(`DELETE FROM addon_file_packs WHERE addon_file_id = ?`).run(addonFile.id);
+      db.prepare(`DELETE FROM addon_file_downloads WHERE addon_file_id = ?`).run(addonFile.id);
+    }
+
     const upsertDownload = db.prepare(
       `INSERT INTO addon_file_downloads (
         id,

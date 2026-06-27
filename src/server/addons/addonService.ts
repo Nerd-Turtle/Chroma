@@ -522,6 +522,22 @@ function buildMissingDependencyMessage(packs: InspectedCurseForgeAddonPack[]): s
   return `Missing required pack dependencies: ${[...missingDependencyUuids].join(", ")}`;
 }
 
+function getDiscoveredPackIdentity(pack: DiscoveredAddonPack): string {
+  return `${pack.packType}:${pack.headerUuid.toLowerCase()}:${JSON.stringify(pack.headerVersion)}`;
+}
+
+function dedupeDiscoveredPacks(packs: InspectedCurseForgeAddonPack[]): InspectedCurseForgeAddonPack[] {
+  const packsByIdentity = new Map<string, InspectedCurseForgeAddonPack>();
+  for (const inspectedPack of packs) {
+    const identity = getDiscoveredPackIdentity(inspectedPack.pack);
+    if (!packsByIdentity.has(identity)) {
+      packsByIdentity.set(identity, inspectedPack);
+    }
+  }
+
+  return [...packsByIdentity.values()];
+}
+
 async function fetchCurseForgeAddonProject(db: Database, input: DownloadCurseForgeAddonInput) {
   const apiKey = getCurseForgeApiKey(db);
   if (!apiKey) {
@@ -593,9 +609,10 @@ async function fetchCurseForgeAddonProject(db: Database, input: DownloadCurseFor
     }
   }
 
-  const missingDependencyError = buildMissingDependencyMessage(discoveredPacks);
+  const normalizedPacks = dedupeDiscoveredPacks(discoveredPacks);
+  const missingDependencyError = buildMissingDependencyMessage(normalizedPacks);
   const error =
-    discoveredPacks.length === 0
+    normalizedPacks.length === 0
       ? fileErrors[0] ?? "No Bedrock pack manifests were discovered in the selected CurseForge files."
       : fileErrors.length > 0
         ? `Some CurseForge files failed: ${fileErrors.join("; ")}`
@@ -613,7 +630,7 @@ async function fetchCurseForgeAddonProject(db: Database, input: DownloadCurseFor
     files: selectedRelease.files,
     downloadedFiles,
     error,
-    discoveredPacks,
+    discoveredPacks: normalizedPacks,
   };
 }
 

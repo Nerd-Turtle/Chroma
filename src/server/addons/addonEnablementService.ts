@@ -1,5 +1,5 @@
 import { copyFile, mkdir, opendir, readFile, rm, stat, writeFile } from "node:fs/promises";
-import { dirname, isAbsolute, join, relative } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import type { Database } from "better-sqlite3";
 import type { Instance, InstanceAddon, InstanceAddonPack } from "../../shared/types/index.js";
 import { getBdsRuntimeState } from "../bds/bdsRuntimeService.js";
@@ -16,7 +16,7 @@ type WorldPackReference = {
 };
 
 function assertChildPath(parentPath: string, childPath: string): void {
-  const relativePath = relative(parentPath, childPath);
+  const relativePath = relative(resolve(parentPath), resolve(childPath));
   if (relativePath === "" || relativePath.startsWith("..") || isAbsolute(relativePath)) {
     throw new Error("Resolved addon path is outside the expected instance directory.");
   }
