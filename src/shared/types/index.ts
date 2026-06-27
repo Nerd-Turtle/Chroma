@@ -2,6 +2,8 @@ export type { Instance, InstanceStatus, InstanceUpdateCheckFrequency, InstanceUp
 export type { InstanceRuntimeEvent, InstanceRuntimeEventCategory, InstanceRuntimeEventLevel } from "./runtimeEvent.js";
 export type {
   AddonProvider,
+  AddonDownloadedFile,
+  AddonDownloadedFileStatus,
   AddonLibraryItem,
   AddonLibraryLinkedInstance,
   AddonUpdateSettings,

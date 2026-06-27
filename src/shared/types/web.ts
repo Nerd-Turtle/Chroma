@@ -9,6 +9,7 @@ import type {
   CurseForgeAddonSearchResult,
   CurseForgeAddonSearchSort,
   AddonLibraryItem,
+  AddonDownloadedFile,
   AddonUpdateSettings,
   InstanceAddon,
   InstanceAddonPack,
@@ -178,11 +179,13 @@ export type UpdateAddonLibraryLinksRequest = {
 
 export type AddonLibraryEditorResponse = {
   addon: AddonLibraryItem;
+  downloadedFiles: AddonDownloadedFile[];
   instances: AddonLibraryLinkedInstance[];
 };
 
 export type InstanceAddonDetailResponse = {
   addon: InstanceAddon;
+  downloadedFiles: AddonDownloadedFile[];
   packs: InstanceAddonPack[];
 };
 
@@ -207,7 +210,7 @@ export type CurseForgeAddonSearchRequest = {
 
 export type CurseForgeAddonDownloadRequest = {
   projectId: number;
-  fileId: number;
+  fileId?: number;
 };
 
 export type InstanceSettingsResponse = {

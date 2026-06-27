@@ -2,6 +2,8 @@ import type { Database } from "better-sqlite3";
 import type {
   AddonLibraryLinkedInstance,
   AddonProvider,
+  AddonDownloadedFile,
+  AddonDownloadedFileStatus,
   AddonLibraryItem,
   InstanceAddon,
   InstanceAddonPack,
@@ -11,23 +13,25 @@ import type {
   InstanceAddonStatus,
 } from "../../shared/types/index.js";
 
-export type SaveInstanceAddonInput = Omit<InstanceAddon, "packCounts"> & {
+export type SaveInstanceAddonInput = Omit<InstanceAddon, "packCounts" | "downloadedFileCount" | "downloadedFileErrorCount"> & {
   providerMetadataJson?: string;
 };
 
 export type SaveInstanceAddonPackInput = Omit<InstanceAddonPack, "headerVersion" | "minEngineVersion"> & {
   headerVersionJson: string;
   minEngineVersionJson?: string;
+  addonFileDownloadId?: string;
   manifestJson?: string;
 };
 
-export type SaveAddonFileInput = Omit<AddonLibraryItem, "packCounts" | "registeredInstanceCount"> & {
+export type SaveAddonFileInput = Omit<AddonLibraryItem, "packCounts" | "downloadedFileCount" | "downloadedFileErrorCount" | "registeredInstanceCount"> & {
   providerMetadataJson?: string;
 };
 
 export type SaveAddonFilePackInput = {
   id: string;
   addonFileId: string;
+  addonFileDownloadId?: string;
   packType: InstanceAddonPackType;
   name?: string;
   description?: string;
@@ -36,6 +40,24 @@ export type SaveAddonFilePackInput = {
   minEngineVersionJson?: string;
   sourcePath: string;
   manifestJson?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type SaveAddonFileDownloadInput = {
+  id: string;
+  addonFileId: string;
+  providerFileId: string;
+  fileName: string;
+  fileDisplayName?: string;
+  fileDate?: string;
+  downloadCount?: number;
+  fileLength?: number;
+  archivePath?: string;
+  extractedPath?: string;
+  status: AddonDownloadedFileStatus;
+  error?: string;
+  providerMetadataJson?: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -68,6 +90,8 @@ type InstanceAddonRow = {
   skin_count: number;
   unknown_count: number;
   unsupported_count: number;
+  downloaded_file_count: number;
+  downloaded_file_error_count: number;
   created_at: string;
   updated_at: string;
 };
@@ -95,6 +119,8 @@ type AddonFileRow = {
   skin_count: number;
   unknown_count: number;
   unsupported_count: number;
+  downloaded_file_count: number;
+  downloaded_file_error_count: number;
   registered_instance_count: number;
   created_at: string;
   updated_at: string;
@@ -123,6 +149,7 @@ type InstanceAddonPackRow = {
 type AddonFilePackRow = {
   id: string;
   addon_file_id: string;
+  addon_file_download_id: string | null;
   pack_type: string;
   name: string | null;
   description: string | null;
@@ -135,11 +162,30 @@ type AddonFilePackRow = {
   updated_at: string;
 };
 
+type AddonFileDownloadRow = {
+  id: string;
+  addon_file_id: string;
+  provider_file_id: string;
+  file_name: string;
+  file_display_name: string | null;
+  file_date: string | null;
+  download_count: number | null;
+  file_length: number | null;
+  archive_path: string | null;
+  extracted_path: string | null;
+  status: string;
+  error: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 type AddonLibraryLinkedInstanceRow = {
   instance_id: string;
   friendly_name: string;
   status: string;
   linked: number;
+  addon_id: string | null;
+  addon_status: string | null;
   auto_update_enabled: number | null;
 };
 
@@ -178,6 +224,8 @@ function mapAddonRow(row: InstanceAddonRow): InstanceAddon {
     status: row.status as InstanceAddonStatus,
     workspacePath: row.workspace_path,
     packCounts: mapPackCounts(row),
+    downloadedFileCount: row.downloaded_file_count,
+    downloadedFileErrorCount: row.downloaded_file_error_count,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -198,13 +246,18 @@ function mapAddonRow(row: InstanceAddonRow): InstanceAddon {
 }
 
 function mapAddonLibraryLinkedInstanceRow(row: AddonLibraryLinkedInstanceRow): AddonLibraryLinkedInstance {
-  return {
+  const instance: AddonLibraryLinkedInstance = {
     instanceId: row.instance_id,
     friendlyName: row.friendly_name,
     status: row.status as AddonLibraryLinkedInstance["status"],
     linked: row.linked === 1,
     autoUpdateEnabled: row.auto_update_enabled === null ? true : row.auto_update_enabled === 1,
   };
+
+  if (row.addon_id !== null) instance.addonId = row.addon_id;
+  if (row.addon_status !== null) instance.addonStatus = row.addon_status as InstanceAddonStatus;
+
+  return instance;
 }
 
 function mapAddonFileRow(row: AddonFileRow): AddonLibraryItem {
@@ -216,6 +269,8 @@ function mapAddonFileRow(row: AddonFileRow): AddonLibraryItem {
     name: row.name,
     workspacePath: row.workspace_path,
     packCounts: mapPackCounts(row),
+    downloadedFileCount: row.downloaded_file_count,
+    downloadedFileErrorCount: row.downloaded_file_error_count,
     registeredInstanceCount: row.registered_instance_count,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -261,6 +316,28 @@ function mapPackRow(row: InstanceAddonPackRow): InstanceAddonPack {
   return pack;
 }
 
+function mapAddonFileDownloadRow(row: AddonFileDownloadRow): AddonDownloadedFile {
+  const file: AddonDownloadedFile = {
+    id: row.id,
+    addonFileId: row.addon_file_id,
+    providerFileId: row.provider_file_id,
+    fileName: row.file_name,
+    status: row.status as AddonDownloadedFileStatus,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+
+  if (row.file_display_name !== null) file.fileDisplayName = row.file_display_name;
+  if (row.file_date !== null) file.fileDate = row.file_date;
+  if (row.download_count !== null) file.downloadCount = row.download_count;
+  if (row.file_length !== null) file.fileLength = row.file_length;
+  if (row.archive_path !== null) file.archivePath = row.archive_path;
+  if (row.extracted_path !== null) file.extractedPath = row.extracted_path;
+  if (row.error !== null) file.error = row.error;
+
+  return file;
+}
+
 const addonSelectSql = `
   SELECT
     addon.id,
@@ -291,7 +368,9 @@ const addonSelectSql = `
     COALESCE(SUM(CASE WHEN pack.pack_type = 'resource' THEN 1 ELSE 0 END), 0) AS resource_count,
     COALESCE(SUM(CASE WHEN pack.pack_type = 'skin' THEN 1 ELSE 0 END), 0) AS skin_count,
     COALESCE(SUM(CASE WHEN pack.pack_type = 'unknown' THEN 1 ELSE 0 END), 0) AS unknown_count,
-    COALESCE(SUM(CASE WHEN pack.status = 'unsupported' THEN 1 ELSE 0 END), 0) AS unsupported_count
+    COALESCE(SUM(CASE WHEN pack.status = 'unsupported' THEN 1 ELSE 0 END), 0) AS unsupported_count,
+    (SELECT COUNT(*) FROM addon_file_downloads download WHERE download.addon_file_id = file.id) AS downloaded_file_count,
+    (SELECT COUNT(*) FROM addon_file_downloads download WHERE download.addon_file_id = file.id AND download.status = 'error') AS downloaded_file_error_count
   FROM instance_addons addon
   JOIN addon_files file ON file.id = addon.addon_file_id
   LEFT JOIN instance_addon_packs pack ON pack.addon_id = addon.id
@@ -317,6 +396,8 @@ export function listAddonFiles(db: Database): AddonLibraryItem[] {
         COALESCE(SUM(CASE WHEN pack.pack_type = 'skin' THEN 1 ELSE 0 END), 0) AS skin_count,
         COALESCE(SUM(CASE WHEN pack.pack_type = 'unknown' THEN 1 ELSE 0 END), 0) AS unknown_count,
         COALESCE(SUM(CASE WHEN pack.pack_type = 'unknown' THEN 1 ELSE 0 END), 0) AS unsupported_count,
+        (SELECT COUNT(*) FROM addon_file_downloads download WHERE download.addon_file_id = file.id) AS downloaded_file_count,
+        (SELECT COUNT(*) FROM addon_file_downloads download WHERE download.addon_file_id = file.id AND download.status = 'error') AS downloaded_file_error_count,
         COUNT(DISTINCT instance_addon.instance_id) AS registered_instance_count
       FROM addon_files file
       LEFT JOIN addon_file_packs pack ON pack.addon_file_id = file.id
@@ -337,6 +418,8 @@ export function getAddonFile(db: Database, addonFileId: string): AddonLibraryIte
         COALESCE(SUM(CASE WHEN pack.pack_type = 'skin' THEN 1 ELSE 0 END), 0) AS skin_count,
         COALESCE(SUM(CASE WHEN pack.pack_type = 'unknown' THEN 1 ELSE 0 END), 0) AS unknown_count,
         COALESCE(SUM(CASE WHEN pack.pack_type = 'unknown' THEN 1 ELSE 0 END), 0) AS unsupported_count,
+        (SELECT COUNT(*) FROM addon_file_downloads download WHERE download.addon_file_id = file.id) AS downloaded_file_count,
+        (SELECT COUNT(*) FROM addon_file_downloads download WHERE download.addon_file_id = file.id AND download.status = 'error') AS downloaded_file_error_count,
         COUNT(DISTINCT instance_addon.instance_id) AS registered_instance_count
       FROM addon_files file
       LEFT JOIN addon_file_packs pack ON pack.addon_file_id = file.id
@@ -368,6 +451,7 @@ export function listAddonFilePacks(db: Database, addonFileId: string): SaveAddon
       updatedAt: row.updated_at,
     };
 
+    if (row.addon_file_download_id !== null) pack.addonFileDownloadId = row.addon_file_download_id;
     if (row.name !== null) pack.name = row.name;
     if (row.description !== null) pack.description = row.description;
     if (row.min_engine_version_json !== null) pack.minEngineVersionJson = row.min_engine_version_json;
@@ -375,6 +459,30 @@ export function listAddonFilePacks(db: Database, addonFileId: string): SaveAddon
 
     return pack;
   });
+}
+
+export function listAddonFileDownloads(db: Database, addonFileId: string): AddonDownloadedFile[] {
+  const rows = db.prepare(
+    `SELECT id,
+        addon_file_id,
+        provider_file_id,
+        file_name,
+        file_display_name,
+        file_date,
+        download_count,
+        file_length,
+        archive_path,
+        extracted_path,
+        status,
+        error,
+        created_at,
+        updated_at
+      FROM addon_file_downloads
+      WHERE addon_file_id = ?
+      ORDER BY file_date DESC, provider_file_id ASC`,
+  ).all(addonFileId) as AddonFileDownloadRow[];
+
+  return rows.map(mapAddonFileDownloadRow);
 }
 
 export function saveAddonFilePacks(db: Database, addonFileId: string, packs: SaveAddonFilePackInput[]): void {
@@ -399,6 +507,7 @@ export function saveAddonFilePacks(db: Database, addonFileId: string, packs: Sav
     const updatePack = db.prepare(
       `UPDATE addon_file_packs
       SET pack_type = @pack_type,
+        addon_file_download_id = @addon_file_download_id,
         name = @name,
         description = @description,
         min_engine_version_json = @min_engine_version_json,
@@ -410,6 +519,7 @@ export function saveAddonFilePacks(db: Database, addonFileId: string, packs: Sav
       `INSERT INTO addon_file_packs (
         id,
         addon_file_id,
+        addon_file_download_id,
         pack_type,
         name,
         description,
@@ -423,6 +533,7 @@ export function saveAddonFilePacks(db: Database, addonFileId: string, packs: Sav
       ) VALUES (
         @id,
         @addon_file_id,
+        @addon_file_download_id,
         @pack_type,
         @name,
         @description,
@@ -455,6 +566,7 @@ export function saveAddonFilePacks(db: Database, addonFileId: string, packs: Sav
       const persistedPack = {
         id: persistedPackId,
         addon_file_id: addonFileId,
+        addon_file_download_id: pack.addonFileDownloadId ?? null,
         pack_type: pack.packType,
         name: pack.name ?? null,
         description: pack.description ?? null,
@@ -506,6 +618,8 @@ export function listAddonLibraryLinkedInstances(db: Database, addonFileId: strin
         inst.friendly_name,
         inst.status,
         CASE WHEN addon.id IS NULL THEN 0 ELSE 1 END AS linked,
+        addon.id AS addon_id,
+        addon.status AS addon_status,
         addon.auto_update_enabled
       FROM instances inst
       LEFT JOIN instance_addons addon
@@ -566,6 +680,8 @@ export function getAddonFileByProviderFile(
         COALESCE(SUM(CASE WHEN pack.pack_type = 'skin' THEN 1 ELSE 0 END), 0) AS skin_count,
         COALESCE(SUM(CASE WHEN pack.pack_type = 'unknown' THEN 1 ELSE 0 END), 0) AS unknown_count,
         COALESCE(SUM(CASE WHEN pack.pack_type = 'unknown' THEN 1 ELSE 0 END), 0) AS unsupported_count,
+        (SELECT COUNT(*) FROM addon_file_downloads download WHERE download.addon_file_id = file.id) AS downloaded_file_count,
+        (SELECT COUNT(*) FROM addon_file_downloads download WHERE download.addon_file_id = file.id AND download.status = 'error') AS downloaded_file_error_count,
         COUNT(DISTINCT instance_addon.instance_id) AS registered_instance_count
       FROM addon_files file
       LEFT JOIN addon_file_packs pack ON pack.addon_file_id = file.id
@@ -577,7 +693,12 @@ export function getAddonFileByProviderFile(
   return row ? mapAddonFileRow(row) : undefined;
 }
 
-export function saveAddonFileWithPacks(db: Database, addon: SaveAddonFileInput, packs: SaveAddonFilePackInput[]): void {
+export function saveAddonFileWithPacks(
+  db: Database,
+  addon: SaveAddonFileInput,
+  packs: SaveAddonFilePackInput[],
+  downloads: SaveAddonFileDownloadInput[] = [],
+): void {
   const save = db.transaction(() => {
     db.prepare(
       `INSERT INTO addon_files (
@@ -670,6 +791,75 @@ export function saveAddonFileWithPacks(db: Database, addon: SaveAddonFileInput, 
       throw new Error("Failed to save addon file record.");
     }
 
+    const upsertDownload = db.prepare(
+      `INSERT INTO addon_file_downloads (
+        id,
+        addon_file_id,
+        provider_file_id,
+        file_name,
+        file_display_name,
+        file_date,
+        download_count,
+        file_length,
+        archive_path,
+        extracted_path,
+        status,
+        error,
+        provider_metadata_json,
+        created_at,
+        updated_at
+      ) VALUES (
+        @id,
+        @addon_file_id,
+        @provider_file_id,
+        @file_name,
+        @file_display_name,
+        @file_date,
+        @download_count,
+        @file_length,
+        @archive_path,
+        @extracted_path,
+        @status,
+        @error,
+        @provider_metadata_json,
+        @created_at,
+        @updated_at
+      )
+      ON CONFLICT(addon_file_id, provider_file_id) DO UPDATE SET
+        id = excluded.id,
+        file_name = excluded.file_name,
+        file_display_name = excluded.file_display_name,
+        file_date = excluded.file_date,
+        download_count = excluded.download_count,
+        file_length = excluded.file_length,
+        archive_path = excluded.archive_path,
+        extracted_path = excluded.extracted_path,
+        status = excluded.status,
+        error = excluded.error,
+        provider_metadata_json = excluded.provider_metadata_json,
+        updated_at = excluded.updated_at`,
+    );
+
+    for (const download of downloads) {
+      upsertDownload.run({
+        id: download.id,
+        addon_file_id: addonFile.id,
+        provider_file_id: download.providerFileId,
+        file_name: download.fileName,
+        file_display_name: download.fileDisplayName ?? null,
+        file_date: download.fileDate ?? null,
+        download_count: download.downloadCount ?? null,
+        file_length: download.fileLength ?? null,
+        archive_path: download.archivePath ?? null,
+        extracted_path: download.extractedPath ?? null,
+        status: download.status,
+        error: download.error ?? null,
+        provider_metadata_json: download.providerMetadataJson ?? null,
+        created_at: download.createdAt,
+        updated_at: download.updatedAt,
+      });
+    }
+
     const findExistingPackByExactType = db.prepare(
       `SELECT id
       FROM addon_file_packs
@@ -690,6 +880,7 @@ export function saveAddonFileWithPacks(db: Database, addon: SaveAddonFileInput, 
     const updatePack = db.prepare(
       `UPDATE addon_file_packs
       SET pack_type = @pack_type,
+        addon_file_download_id = @addon_file_download_id,
         name = @name,
         description = @description,
         min_engine_version_json = @min_engine_version_json,
@@ -701,6 +892,7 @@ export function saveAddonFileWithPacks(db: Database, addon: SaveAddonFileInput, 
       `INSERT INTO addon_file_packs (
         id,
         addon_file_id,
+        addon_file_download_id,
         pack_type,
         name,
         description,
@@ -714,6 +906,7 @@ export function saveAddonFileWithPacks(db: Database, addon: SaveAddonFileInput, 
       ) VALUES (
         @id,
         @addon_file_id,
+        @addon_file_download_id,
         @pack_type,
         @name,
         @description,
@@ -746,6 +939,7 @@ export function saveAddonFileWithPacks(db: Database, addon: SaveAddonFileInput, 
       const persistedPack = {
         id: persistedPackId,
         addon_file_id: addonFile.id,
+        addon_file_download_id: pack.addonFileDownloadId ?? null,
         pack_type: pack.packType,
         name: pack.name ?? null,
         description: pack.description ?? null,
@@ -841,6 +1035,7 @@ export function saveInstanceAddonWithPacks(
   db: Database,
   addon: SaveInstanceAddonInput,
   packs: SaveInstanceAddonPackInput[],
+  downloads: SaveAddonFileDownloadInput[] = [],
 ): void {
   const save = db.transaction(() => {
     db.prepare(
@@ -932,6 +1127,75 @@ export function saveInstanceAddonWithPacks(
 
     if (!addonFile) {
       throw new Error("Failed to save addon file record.");
+    }
+
+    const upsertDownload = db.prepare(
+      `INSERT INTO addon_file_downloads (
+        id,
+        addon_file_id,
+        provider_file_id,
+        file_name,
+        file_display_name,
+        file_date,
+        download_count,
+        file_length,
+        archive_path,
+        extracted_path,
+        status,
+        error,
+        provider_metadata_json,
+        created_at,
+        updated_at
+      ) VALUES (
+        @id,
+        @addon_file_id,
+        @provider_file_id,
+        @file_name,
+        @file_display_name,
+        @file_date,
+        @download_count,
+        @file_length,
+        @archive_path,
+        @extracted_path,
+        @status,
+        @error,
+        @provider_metadata_json,
+        @created_at,
+        @updated_at
+      )
+      ON CONFLICT(addon_file_id, provider_file_id) DO UPDATE SET
+        id = excluded.id,
+        file_name = excluded.file_name,
+        file_display_name = excluded.file_display_name,
+        file_date = excluded.file_date,
+        download_count = excluded.download_count,
+        file_length = excluded.file_length,
+        archive_path = excluded.archive_path,
+        extracted_path = excluded.extracted_path,
+        status = excluded.status,
+        error = excluded.error,
+        provider_metadata_json = excluded.provider_metadata_json,
+        updated_at = excluded.updated_at`,
+    );
+
+    for (const download of downloads) {
+      upsertDownload.run({
+        id: download.id,
+        addon_file_id: addonFile.id,
+        provider_file_id: download.providerFileId,
+        file_name: download.fileName,
+        file_display_name: download.fileDisplayName ?? null,
+        file_date: download.fileDate ?? null,
+        download_count: download.downloadCount ?? null,
+        file_length: download.fileLength ?? null,
+        archive_path: download.archivePath ?? null,
+        extracted_path: download.extractedPath ?? null,
+        status: download.status,
+        error: download.error ?? null,
+        provider_metadata_json: download.providerMetadataJson ?? null,
+        created_at: download.createdAt,
+        updated_at: download.updatedAt,
+      });
     }
 
     db.prepare(
@@ -1083,9 +1347,10 @@ export function saveInstanceAddonWithPacks(
     for (const pack of packs) {
       db.prepare(
         `INSERT INTO addon_file_packs (
-          id,
-          addon_file_id,
-          pack_type,
+        id,
+        addon_file_id,
+        addon_file_download_id,
+        pack_type,
           name,
           description,
           header_uuid,
@@ -1096,9 +1361,10 @@ export function saveInstanceAddonWithPacks(
           created_at,
           updated_at
         ) VALUES (
-          @id,
-          @addon_file_id,
-          @pack_type,
+        @id,
+        @addon_file_id,
+        @addon_file_download_id,
+        @pack_type,
           @name,
           @description,
           @header_uuid,
@@ -1110,6 +1376,7 @@ export function saveInstanceAddonWithPacks(
           @updated_at
         )
         ON CONFLICT(addon_file_id, pack_type, header_uuid, header_version_json, source_path) DO UPDATE SET
+          addon_file_download_id = excluded.addon_file_download_id,
           name = excluded.name,
           description = excluded.description,
           min_engine_version_json = excluded.min_engine_version_json,
@@ -1118,6 +1385,7 @@ export function saveInstanceAddonWithPacks(
       ).run({
         id: pack.addonFilePackId,
         addon_file_id: addonFile.id,
+        addon_file_download_id: pack.addonFileDownloadId ?? null,
         pack_type: pack.packType,
         name: pack.name ?? null,
         description: pack.description ?? null,

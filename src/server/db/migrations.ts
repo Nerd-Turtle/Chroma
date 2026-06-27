@@ -112,6 +112,7 @@ export function runMigrations(db: Database): void {
     CREATE TABLE IF NOT EXISTS addon_file_packs (
       id TEXT PRIMARY KEY,
       addon_file_id TEXT NOT NULL,
+      addon_file_download_id TEXT,
       pack_type TEXT NOT NULL,
       name TEXT,
       description TEXT,
@@ -120,6 +121,25 @@ export function runMigrations(db: Database): void {
       min_engine_version_json TEXT,
       source_path TEXT NOT NULL,
       manifest_json TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (addon_file_id) REFERENCES addon_files(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS addon_file_downloads (
+      id TEXT PRIMARY KEY,
+      addon_file_id TEXT NOT NULL,
+      provider_file_id TEXT NOT NULL,
+      file_name TEXT NOT NULL,
+      file_display_name TEXT,
+      file_date TEXT,
+      download_count INTEGER,
+      file_length INTEGER,
+      archive_path TEXT,
+      extracted_path TEXT,
+      status TEXT NOT NULL,
+      error TEXT,
+      provider_metadata_json TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       FOREIGN KEY (addon_file_id) REFERENCES addon_files(id) ON DELETE CASCADE
@@ -194,6 +214,9 @@ export function runMigrations(db: Database): void {
     CREATE UNIQUE INDEX IF NOT EXISTS idx_addon_file_packs_identity
       ON addon_file_packs (addon_file_id, pack_type, header_uuid, header_version_json, source_path);
 
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_addon_file_downloads_identity
+      ON addon_file_downloads (addon_file_id, provider_file_id);
+
     CREATE INDEX IF NOT EXISTS idx_instance_addon_packs_pack_identity
       ON instance_addon_packs (instance_id, header_uuid, header_version_json, pack_type);
 
@@ -267,6 +290,17 @@ export function runMigrations(db: Database): void {
   if (!instanceAddonPackColumnNames.has("addon_file_pack_id")) {
     db.exec(`ALTER TABLE instance_addon_packs ADD COLUMN addon_file_pack_id TEXT;`);
   }
+
+  const addonFilePackColumns = db.prepare(`PRAGMA table_info(addon_file_packs)`).all() as Array<{ name: string }>;
+  const addonFilePackColumnNames = new Set(addonFilePackColumns.map((column) => column.name));
+  if (!addonFilePackColumnNames.has("addon_file_download_id")) {
+    db.exec(`ALTER TABLE addon_file_packs ADD COLUMN addon_file_download_id TEXT;`);
+  }
+
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_addon_file_packs_download
+      ON addon_file_packs (addon_file_download_id);
+  `);
 
   db.exec(`
     INSERT OR IGNORE INTO addon_files (

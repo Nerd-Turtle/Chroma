@@ -938,6 +938,51 @@ Make central addon library records the canonical database registration for downl
 
 Completed on the current branch/worktree. Addon files and discovered packs are now centrally registered; instance rows represent registration and enablement state. The Addon Library browse/download UI no longer targets an instance.
 
+## Phase 4.8: CurseForge Project File Normalization
+
+### Objective
+
+Treat a CurseForge addon download as a project release set instead of a single provider file, so Bedrock addons with separately uploaded behavior/resource packs install as one normalized Chroma addon.
+
+### Scope
+
+- Call the CurseForge project files endpoint before downloading.
+- Use the selected/latest file as the release anchor.
+- Download sibling `.mcpack`/`.mcaddon` files from the same release into one addon workspace.
+- Store one per-file download row with status, error, archive path, and extracted path.
+- Parse all selected archives and normalize discovered packs under one library/instance addon.
+- Capture manifest UUID dependencies and report missing pack dependencies after all sibling files are parsed.
+- Keep existing tolerant archive parsing behavior for nested packs, JSON comments, dotted/string versions, and recovered leading JSON objects.
+
+### Implementation Notes
+
+- Added central downloaded-file persistence in:
+  - [src/server/db/migrations.ts](/home/turtle/chroma/src/server/db/migrations.ts)
+  - [src/server/addons/addonRepository.ts](/home/turtle/chroma/src/server/addons/addonRepository.ts)
+- Added release/workspace storage helpers in:
+  - [src/server/addons/addonStoragePaths.ts](/home/turtle/chroma/src/server/addons/addonStoragePaths.ts)
+- Added CurseForge project file listing in:
+  - [src/server/addons/curseForgeClient.ts](/home/turtle/chroma/src/server/addons/curseForgeClient.ts)
+- Reworked CurseForge download/normalization in:
+  - [src/server/addons/addonService.ts](/home/turtle/chroma/src/server/addons/addonService.ts)
+- Updated API request/response types and Addon Library UI state in:
+  - [src/shared/types/addon.ts](/home/turtle/chroma/src/shared/types/addon.ts)
+  - [src/shared/types/web.ts](/home/turtle/chroma/src/shared/types/web.ts)
+  - [src/web/src/pages/AddonLibraryPage.tsx](/home/turtle/chroma/src/web/src/pages/AddonLibraryPage.tsx)
+
+### Validation Notes
+
+- Ran `pnpm typecheck` successfully.
+- Ran `pnpm build` successfully.
+- Ran an in-memory SQLite migration smoke check and verified:
+  - `addon_file_downloads` table is created
+  - `addon_file_packs.addon_file_download_id` is created
+- Live CurseForge download validation was not run in this pass, to avoid relying on local provider secrets.
+
+### Status
+
+Implemented on the current branch/worktree. Chroma now requests CurseForge project files, downloads the selected release's sibling archives into one workspace, stores per-file status/error records, and parses all discovered packs as one addon.
+
 ## Phase 5: Provider-Aware Update Checks
 
 ### Objective

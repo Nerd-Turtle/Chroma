@@ -1,6 +1,7 @@
 import { ArrowDownToLine, GripVertical, LoaderCircle, Play, RotateCw, Save, Square, SquarePen, Terminal, Trash2, X } from "lucide-react";
 import { useEffect, useRef, useState, type DragEvent, type FormEvent, type ReactNode } from "react";
 import type {
+  AddonLibraryItem,
   BdsStartValidationResult,
   BdsConsoleLine,
   BdsInstall,
@@ -19,6 +20,7 @@ import {
   deleteInstance,
   disableInstanceAddon,
   enableInstanceAddon,
+  getAddonLibrary,
   getInstance,
   getInstanceAddons,
   getInstanceBdsLogFiles,
@@ -35,6 +37,7 @@ import {
   manualUpdateInstanceBds,
   restartInstanceBds,
   sendInstanceConsoleCommand,
+  selectInstanceLibraryAddons,
   startInstanceBds,
   stopInstanceBds,
   updateInstance,
@@ -184,7 +187,7 @@ function getAddonStatusToneClass(status: InstanceAddon["status"]): string {
   return "status-stopped";
 }
 
-function getAddonPackSummary(addon: InstanceAddon): string {
+function getAddonPackSummary(addon: { packCounts: InstanceAddon["packCounts"] }): string {
   const parts = [
     addon.packCounts.behavior > 0 ? `${addon.packCounts.behavior} behavior` : "",
     addon.packCounts.resource > 0 ? `${addon.packCounts.resource} resource` : "",
@@ -453,6 +456,7 @@ const InstancesPage = () => {
   const consoleEventSourceRef = useRef<EventSource | null>(null);
   const consoleOutputRef = useRef<HTMLDivElement | null>(null);
   const consoleInputRef = useRef<HTMLInputElement | null>(null);
+  const deleteDialogCancelRef = useRef<HTMLButtonElement | null>(null);
   const [instances, setInstances] = useState<Instance[]>([]);
   const [instanceBdsStatuses, setInstanceBdsStatuses] = useState<Record<string, BdsInstall>>({});
   const [selectedInstanceId, setSelectedInstanceId] = useState<string>("");
@@ -494,6 +498,11 @@ const InstancesPage = () => {
   const [logViewerError, setLogViewerError] = useState("");
   const [addonActionInFlight, setAddonActionInFlight] = useState<string>("");
   const [addonOrderSaving, setAddonOrderSaving] = useState(false);
+  const [addonLinkEditorOpen, setAddonLinkEditorOpen] = useState(false);
+  const [addonLinkEditorLoading, setAddonLinkEditorLoading] = useState(false);
+  const [addonLinkEditorSaving, setAddonLinkEditorSaving] = useState(false);
+  const [addonLinkLibrary, setAddonLinkLibrary] = useState<AddonLibraryItem[]>([]);
+  const [selectedAddonFileIds, setSelectedAddonFileIds] = useState<string[]>([]);
   const [draggedAddonId, setDraggedAddonId] = useState("");
   const [addonDropIndicator, setAddonDropIndicator] = useState<{
     addonId: string;
@@ -821,7 +830,24 @@ const InstancesPage = () => {
   useEffect(() => {
     setActiveTab("overview");
     setDismissedWorkspaceNoticeIds([]);
+    setAddonLinkEditorOpen(false);
+    setAddonLinkLibrary([]);
+    setSelectedAddonFileIds([]);
   }, [rightPaneMode, selectedInstanceId]);
+
+  useEffect(() => {
+    if (!deleteConfirmOpen) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      deleteDialogCancelRef.current?.focus();
+    }, 0);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [deleteConfirmOpen]);
 
   useEffect(() => {
     if (rightPaneMode !== "details" || activeTab !== "logs" || !selectedInstanceId) {
@@ -959,6 +985,101 @@ const InstancesPage = () => {
       setError(enablementError instanceof Error ? enablementError.message : `Unable to ${action} addon`);
     } finally {
       setAddonActionInFlight("");
+    }
+  }
+
+  async function openAddonLinkEditor() {
+    if (!workspaceData) {
+      return;
+    }
+
+    setAddonLinkEditorOpen(true);
+    setAddonLinkEditorLoading(true);
+    setAddonLinkEditorSaving(false);
+    setAddonLinkLibrary([]);
+    setSelectedAddonFileIds(workspaceData.addons.map((addon) => addon.addonFileId));
+    setError("");
+    setBanner(null);
+
+    try {
+      const result = await getAddonLibrary();
+      setAddonLinkLibrary(result.addons);
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "Unable to load downloaded addons");
+      setAddonLinkEditorOpen(false);
+    } finally {
+      setAddonLinkEditorLoading(false);
+    }
+  }
+
+  function closeAddonLinkEditor() {
+    if (addonLinkEditorSaving) {
+      return;
+    }
+
+    setAddonLinkEditorOpen(false);
+    setAddonLinkLibrary([]);
+    setSelectedAddonFileIds([]);
+    setAddonLinkEditorLoading(false);
+  }
+
+  function toggleSelectedAddonFile(addonFileId: string) {
+    setSelectedAddonFileIds((current) =>
+      current.includes(addonFileId) ? current.filter((currentId) => currentId !== addonFileId) : [...current, addonFileId],
+    );
+  }
+
+  async function handleUnlinkAddon(addon: InstanceAddon) {
+    if (!selectedInstanceId || !workspaceData || addon.status === "enabled") {
+      return;
+    }
+
+    setAddonActionInFlight(`unlink:${addon.id}`);
+    setError("");
+    setBanner(null);
+
+    try {
+      await selectInstanceLibraryAddons(
+        selectedInstanceId,
+        workspaceData.addons.filter((currentAddon) => currentAddon.id !== addon.id).map((currentAddon) => currentAddon.addonFileId),
+      );
+      await refreshSelectedInstance(selectedInstanceId);
+      setBanner({
+        tone: "info",
+        message: `Unlinked ${addon.name}.`,
+      });
+    } catch (unlinkError) {
+      setError(unlinkError instanceof Error ? unlinkError.message : "Unable to unlink addon");
+    } finally {
+      setAddonActionInFlight("");
+    }
+  }
+
+  async function handleSaveAddonLinks(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!selectedInstanceId) {
+      return;
+    }
+
+    setAddonLinkEditorSaving(true);
+    setError("");
+    setBanner(null);
+
+    try {
+      await selectInstanceLibraryAddons(selectedInstanceId, selectedAddonFileIds);
+      await refreshSelectedInstance(selectedInstanceId);
+      setAddonLinkEditorOpen(false);
+      setAddonLinkLibrary([]);
+      setSelectedAddonFileIds([]);
+      setBanner({
+        tone: "info",
+        message: "Updated linked addons.",
+      });
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Unable to update linked addons");
+    } finally {
+      setAddonLinkEditorSaving(false);
     }
   }
 
@@ -1578,20 +1699,20 @@ const InstancesPage = () => {
                   <button
                     type="button"
                     role="tab"
-                    aria-selected={activeTab === "logs"}
-                    className={activeTab === "logs" ? "instances-tab active" : "instances-tab"}
-                    onClick={() => setActiveTab("logs")}
-                  >
-                    Logs
-                  </button>
-                  <button
-                    type="button"
-                    role="tab"
                     aria-selected={activeTab === "addons"}
                     className={activeTab === "addons" ? "instances-tab active" : "instances-tab"}
                     onClick={() => setActiveTab("addons")}
                   >
                     Addons
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={activeTab === "logs"}
+                    className={activeTab === "logs" ? "instances-tab active" : "instances-tab"}
+                    onClick={() => setActiveTab("logs")}
+                  >
+                    Logs
                   </button>
                 </div>
               )}
@@ -1651,6 +1772,17 @@ const InstancesPage = () => {
                       onClick={() => void openServerPropertiesEditor()}
                       title="Edit server.properties"
                       aria-label="Edit server.properties"
+                    >
+                      <SquarePen aria-hidden="true" />
+                    </button>
+                  ) : null}
+                  {activeTab === "addons" ? (
+                    <button
+                      type="button"
+                      className="icon-action"
+                      onClick={() => void openAddonLinkEditor()}
+                      title="Edit linked addons"
+                      aria-label="Edit linked addons"
                     >
                       <SquarePen aria-hidden="true" />
                     </button>
@@ -2094,7 +2226,7 @@ const InstancesPage = () => {
                       </div>
                       {workspaceData.addons.length === 0 ? (
                         <div className="instance-addons-empty">
-                          <p className="muted-copy">No addons are linked to this instance yet. Link them from Addon Library.</p>
+                          <p className="muted-copy">No addons are linked to this instance yet.</p>
                         </div>
                       ) : (
                         <div className="instance-addon-table" role="table" aria-label="Instance addon stack">
@@ -2143,6 +2275,24 @@ const InstancesPage = () => {
                                   disabled={addon.status === "error" || workspaceData.runtime.isProcessActive || addonActionInFlight !== "" || addonOrderSaving}
                                 >
                                   <span className="toggle-switch-thumb" />
+                                </button>
+                                <button
+                                  type="button"
+                                  className="icon-action icon-action-danger"
+                                  onClick={() => void handleUnlinkAddon(addon)}
+                                  disabled={addon.status === "enabled" || addonActionInFlight !== "" || addonOrderSaving}
+                                  title={
+                                    addon.status === "enabled"
+                                      ? "Disable this addon before unlinking it."
+                                      : `Unlink ${addon.name}`
+                                  }
+                                  aria-label={`Unlink ${addon.name}`}
+                                >
+                                  {addonActionInFlight === `unlink:${addon.id}` ? (
+                                    <LoaderCircle className="icon-action-spinner" aria-hidden="true" />
+                                  ) : (
+                                    <Trash2 aria-hidden="true" />
+                                  )}
                                 </button>
                               </span>
                             </article>
@@ -2197,6 +2347,99 @@ const InstancesPage = () => {
                         >
                           Cancel
                         </button>
+                      </div>
+                    </form>
+                  ) : null}
+                </aside>
+              </div>
+            ) : null}
+
+            {addonLinkEditorOpen && workspaceData ? (
+              <div className="instance-editor-drawer-layer">
+                <button
+                  type="button"
+                  className="instance-editor-drawer-backdrop"
+                  aria-label="Close addon link editor"
+                  onClick={closeAddonLinkEditor}
+                />
+                <aside className="instance-editor-drawer">
+                  <div className="instance-editor-drawer-header">
+                    <div>
+                      <p className="eyebrow">Instance Addons</p>
+                      <h3>{workspaceData.instance.friendlyName}</h3>
+                    </div>
+                  </div>
+
+                  {addonLinkEditorLoading ? <p className="muted-copy">Loading downloaded addons...</p> : null}
+
+                  {!addonLinkEditorLoading ? (
+                    <form className="addon-library-editor-form instance-editor-form" onSubmit={handleSaveAddonLinks}>
+                      <div className="addon-library-editor-fields instance-editor-fields">
+                        <section className="addon-library-editor-section">
+                          <div className="addon-library-editor-section-copy">
+                            <strong>Downloaded Addons</strong>
+                          </div>
+
+                          {addonLinkLibrary.length === 0 ? (
+                            <p className="muted-copy">No downloaded addons are available.</p>
+                          ) : (
+                            <div className="instance-addon-link-table" role="table" aria-label="Downloaded addons">
+                              <div className="instance-addon-link-header" role="row">
+                                <span role="columnheader">Linked</span>
+                                <span role="columnheader">Addon</span>
+                              </div>
+                              {addonLinkLibrary.map((addon) => {
+                                const linkedAddon = workspaceData.addons.find((currentAddon) => currentAddon.addonFileId === addon.id);
+                                const checked = selectedAddonFileIds.includes(addon.id);
+                                const isEnabled = linkedAddon?.status === "enabled";
+
+                                return (
+                                  <article key={addon.id} className="instance-addon-link-row" role="row">
+                                    <span className="instance-addon-link-action" role="cell">
+                                      <button
+                                        type="button"
+                                        className={checked ? "toggle-switch active" : "toggle-switch"}
+                                        aria-pressed={checked}
+                                        aria-label={`${checked ? "Unlink" : "Link"} ${addon.name}`}
+                                        title={isEnabled ? "Disable this addon before unlinking it." : `${checked ? "Unlink" : "Link"} addon`}
+                                        disabled={addonLinkEditorSaving || isEnabled}
+                                        onClick={() => toggleSelectedAddonFile(addon.id)}
+                                      >
+                                        <span className="toggle-switch-thumb" />
+                                      </button>
+                                    </span>
+                                    <span className="instance-addon-link-copy" role="cell">
+                                      <strong>{addon.name}</strong>
+                                      {addon.summary ? <small>{addon.summary}</small> : null}
+                                      <small>{getAddonPackSummary(addon)}</small>
+                                      {linkedAddon ? (
+                                        <small className={`instance-bds-status ${getAddonStatusToneClass(linkedAddon.status)}`}>
+                                          {formatLabel(linkedAddon.status)}
+                                        </small>
+                                      ) : null}
+                                    </span>
+                                  </article>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </section>
+                      </div>
+
+                      <div className="instance-editor-footer">
+                        <div className="instances-form-actions">
+                          <button type="submit" className="primary-button" disabled={addonLinkEditorSaving}>
+                            {addonLinkEditorSaving ? "Saving..." : "Save"}
+                          </button>
+                          <button
+                            type="button"
+                            className="secondary-button"
+                            onClick={closeAddonLinkEditor}
+                            disabled={addonLinkEditorSaving}
+                          >
+                            Cancel
+                          </button>
+                        </div>
                       </div>
                     </form>
                   ) : null}
@@ -2280,11 +2523,10 @@ const InstancesPage = () => {
                     <button
                       type="button"
                       className={`icon-action icon-action-danger${deleteConfirmOpen ? " icon-action-danger-active" : ""}`}
-                      onClick={() => setDeleteConfirmOpen((open) => !open)}
+                      onClick={() => setDeleteConfirmOpen(true)}
                       disabled={savingInstance || deletingInstance}
                       title="Delete instance"
                       aria-label="Delete instance"
-                      aria-pressed={deleteConfirmOpen}
                     >
                       <Trash2 aria-hidden="true" />
                     </button>
@@ -2393,32 +2635,39 @@ const InstancesPage = () => {
                       </div>
                     </div>
 
-                    {deleteConfirmOpen ? (
-                      <div className="instance-delete-zone">
-                        <div className="instance-delete-confirm">
-                          <span>Are you sure you want to delete this instance?</span>
-                          <div className="instance-delete-confirm-actions">
-                            <button
-                              type="button"
-                              className="danger-button"
-                              onClick={() => void handleDeleteInstance()}
-                              disabled={deletingInstance}
-                            >
-                              {deletingInstance ? "Deleting..." : "Yes"}
-                            </button>
-                            <button
-                              type="button"
-                              className="secondary-button"
-                              onClick={() => setDeleteConfirmOpen(false)}
-                              disabled={deletingInstance}
-                            >
-                              No
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    ) : null}
                   </form>
+                  {deleteConfirmOpen ? (
+                    <div className="instance-delete-dialog-layer" role="presentation">
+                      <section
+                        className="instance-delete-dialog"
+                        role="dialog"
+                        aria-modal="true"
+                        aria-labelledby="instance-delete-dialog-title"
+                      >
+                        <h4 id="instance-delete-dialog-title">Delete instance?</h4>
+                        <p>Are you sure you want to delete {workspaceData.instance.friendlyName}?</p>
+                        <div className="instance-delete-confirm-actions">
+                          <button
+                            type="button"
+                            className="danger-button"
+                            onClick={() => void handleDeleteInstance()}
+                            disabled={deletingInstance}
+                          >
+                            {deletingInstance ? "Deleting..." : "Delete"}
+                          </button>
+                          <button
+                            ref={deleteDialogCancelRef}
+                            type="button"
+                            className="secondary-button"
+                            onClick={() => setDeleteConfirmOpen(false)}
+                            disabled={deletingInstance}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </section>
+                    </div>
+                  ) : null}
                 </aside>
               </div>
             ) : null}

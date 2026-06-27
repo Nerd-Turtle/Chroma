@@ -194,14 +194,17 @@ export async function registerAddonRoutes(app: FastifyInstance, db: Database): P
   app.post("/api/addons/providers/curseforge/download", async (request, reply) => {
     const body = request.body as { projectId?: unknown; fileId?: unknown };
 
-    if (typeof body.projectId !== "number" || typeof body.fileId !== "number" || !Number.isInteger(body.projectId) || !Number.isInteger(body.fileId)) {
-      return reply.code(400).send({ error: "projectId and fileId must be integers" });
+    if (typeof body.projectId !== "number" || !Number.isInteger(body.projectId)) {
+      return reply.code(400).send({ error: "projectId must be an integer" });
+    }
+    if (body.fileId !== undefined && (typeof body.fileId !== "number" || !Number.isInteger(body.fileId))) {
+      return reply.code(400).send({ error: "fileId must be an integer when provided" });
     }
 
     try {
       const detail = await downloadCurseForgeAddonToLibrary(db, {
         projectId: body.projectId,
-        fileId: body.fileId,
+        ...(typeof body.fileId === "number" ? { fileId: body.fileId } : {}),
       });
       return reply.code(201).send(detail);
     } catch (error) {
@@ -313,14 +316,17 @@ export async function registerAddonRoutes(app: FastifyInstance, db: Database): P
     const params = request.params as { instanceId: string };
     const body = request.body as { projectId?: unknown; fileId?: unknown };
 
-    if (typeof body.projectId !== "number" || typeof body.fileId !== "number" || !Number.isInteger(body.projectId) || !Number.isInteger(body.fileId)) {
-      return reply.code(400).send({ error: "projectId and fileId must be integers" });
+    if (typeof body.projectId !== "number" || !Number.isInteger(body.projectId)) {
+      return reply.code(400).send({ error: "projectId must be an integer" });
+    }
+    if (body.fileId !== undefined && (typeof body.fileId !== "number" || !Number.isInteger(body.fileId))) {
+      return reply.code(400).send({ error: "fileId must be an integer when provided" });
     }
 
     try {
       const detail = await downloadCurseForgeAddonForInstance(db, params.instanceId, {
         projectId: body.projectId,
-        fileId: body.fileId,
+        ...(typeof body.fileId === "number" ? { fileId: body.fileId } : {}),
       });
       return reply.code(201).send(detail);
     } catch (error) {

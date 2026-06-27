@@ -12,7 +12,9 @@ import type {
 } from "../../../shared/types/index.js";
 import {
   deleteAddonFromLibrary,
+  disableInstanceAddon,
   downloadCurseForgeAddonToLibrary,
+  enableInstanceAddon,
   getAddonLibraryEditor,
   getAddonLibrary,
   getAddonUpdateSettings,
@@ -134,8 +136,8 @@ const AddonLibraryPage = () => {
   const [sort, setSort] = useState<CurseForgeAddonSearchSort>("popularity");
   const [search, setSearch] = useState<CurseForgeSearchState>({ results: [], pagination: null });
   const [searching, setSearching] = useState(false);
-  const [downloadingFileId, setDownloadingFileId] = useState<number | null>(null);
-  const [completedDownloadFileId, setCompletedDownloadFileId] = useState<number | null>(null);
+  const [downloadingProjectId, setDownloadingProjectId] = useState<number | null>(null);
+  const [completedDownloadProjectId, setCompletedDownloadProjectId] = useState<number | null>(null);
   const [deletingAddonId, setDeletingAddonId] = useState<string>("");
   const [activeTab, setActiveTab] = useState<AddonLibraryTab>("browse");
   const [error, setError] = useState("");
@@ -148,6 +150,7 @@ const AddonLibraryPage = () => {
   const [addonEditorData, setAddonEditorData] = useState<AddonLibraryEditorState | null>(null);
   const [addonEditorLoading, setAddonEditorLoading] = useState(false);
   const [addonEditorSaving, setAddonEditorSaving] = useState(false);
+  const [linkedInstanceAddonAction, setLinkedInstanceAddonAction] = useState("");
   const [selectedLinkedInstanceIds, setSelectedLinkedInstanceIds] = useState<string[]>([]);
   const [linkedInstanceAutoUpdates, setLinkedInstanceAutoUpdates] = useState<Record<string, boolean>>({});
   const resultsAnchorRef = useRef<HTMLDivElement | null>(null);
@@ -223,18 +226,18 @@ const AddonLibraryPage = () => {
   }, []);
 
   useEffect(() => {
-    if (completedDownloadFileId === null) {
+    if (completedDownloadProjectId === null) {
       return;
     }
 
     const timeoutId = window.setTimeout(() => {
-      setCompletedDownloadFileId(null);
+      setCompletedDownloadProjectId(null);
     }, 1600);
 
     return () => {
       window.clearTimeout(timeoutId);
     };
-  }, [completedDownloadFileId]);
+  }, [completedDownloadProjectId]);
 
   useEffect(() => {
     if (!banner) {
@@ -315,21 +318,17 @@ const AddonLibraryPage = () => {
   }
 
   async function handleDownload(result: CurseForgeAddonSearchResult) {
-    if (!result.latestFileId) {
-      return;
-    }
-
-    setDownloadingFileId(result.latestFileId);
+    setDownloadingProjectId(result.projectId);
     setError("");
     setBanner(null);
 
     try {
       await downloadCurseForgeAddonToLibrary({
         projectId: result.projectId,
-        fileId: result.latestFileId,
+        ...(result.latestFileId ? { fileId: result.latestFileId } : {}),
       });
       await loadLibrary();
-      setCompletedDownloadFileId(result.latestFileId);
+      setCompletedDownloadProjectId(result.projectId);
       setBanner({
         tone: "info",
         message: `Downloaded ${result.name}.`,
@@ -337,7 +336,7 @@ const AddonLibraryPage = () => {
     } catch (downloadError) {
       setError(downloadError instanceof Error ? downloadError.message : "Unable to download CurseForge addon");
     } finally {
-      setDownloadingFileId(null);
+      setDownloadingProjectId(null);
     }
   }
 
@@ -399,6 +398,7 @@ const AddonLibraryPage = () => {
     setSelectedLinkedInstanceIds([]);
     setLinkedInstanceAutoUpdates({});
     setAddonEditorLoading(false);
+    setLinkedInstanceAddonAction("");
   }
 
   function toggleLinkedInstance(instanceId: string) {
@@ -421,6 +421,37 @@ const AddonLibraryPage = () => {
       ...current,
       [instanceId]: !(current[instanceId] ?? true),
     }));
+  }
+
+  async function handleLinkedInstanceAddonEnablement(instance: AddonLibraryLinkedInstance) {
+    if (!instance.addonId || !editingAddonId) {
+      return;
+    }
+
+    const action = instance.addonStatus === "enabled" ? "disable" : "enable";
+    setLinkedInstanceAddonAction(`${action}:${instance.instanceId}`);
+    setError("");
+    setBanner(null);
+
+    try {
+      if (action === "enable") {
+        await enableInstanceAddon(instance.instanceId, instance.addonId);
+      } else {
+        await disableInstanceAddon(instance.instanceId, instance.addonId);
+      }
+
+      const result = await getAddonLibraryEditor(editingAddonId);
+      applyEditorState(result);
+      await loadLibrary();
+      setBanner({
+        tone: "info",
+        message: `${action === "enable" ? "Enabled" : "Disabled"} ${result.addon.name} on ${instance.friendlyName}.`,
+      });
+    } catch (toggleError) {
+      setError(toggleError instanceof Error ? toggleError.message : `Unable to ${action} addon`);
+    } finally {
+      setLinkedInstanceAddonAction("");
+    }
   }
 
   async function handleSaveAddonEditor(event: FormEvent<HTMLFormElement>) {
@@ -665,27 +696,28 @@ const AddonLibraryPage = () => {
                 <span role="columnheader">Action</span>
               </div>
               {search.results.map((result) => {
-                const isCurrentFileDownloaded = result.latestFileId
+                const isCurrentReleaseDownloaded = result.latestFileId
                   ? downloadedFileKeys.has(`${result.projectId}:${result.latestFileId}`)
-                  : false;
+                  : downloadedProjectIds.has(String(result.projectId));
                 const hasDownloadedVersion = downloadedProjectIds.has(String(result.projectId));
-                const hasUpdateAvailable = hasDownloadedVersion && !isCurrentFileDownloaded && Boolean(result.latestFileId);
-                const isCompleting = result.latestFileId !== undefined && completedDownloadFileId === result.latestFileId;
-                const actionClassName = isCurrentFileDownloaded || isCompleting
+                const hasUpdateAvailable = hasDownloadedVersion && !isCurrentReleaseDownloaded && Boolean(result.latestFileId);
+                const isDownloading = downloadingProjectId === result.projectId;
+                const isCompleting = completedDownloadProjectId === result.projectId;
+                const actionClassName = isCurrentReleaseDownloaded || isCompleting
                   ? "icon-action-success"
                   : hasUpdateAvailable
                     ? "icon-action-update"
                     : "icon-action-primary";
-                const actionLabel = downloadingFileId === result.latestFileId
+                const actionLabel = isDownloading
                   ? `Downloading ${result.name}`
-                  : isCurrentFileDownloaded || isCompleting
+                  : isCurrentReleaseDownloaded || isCompleting
                     ? `${result.name} already downloaded`
                     : hasUpdateAvailable
                       ? `Update available for ${result.name}`
                       : `Download ${result.name}`;
-                const actionTitle = downloadingFileId === result.latestFileId
+                const actionTitle = isDownloading
                   ? "Downloading addon"
-                  : isCurrentFileDownloaded || isCompleting
+                  : isCurrentReleaseDownloaded || isCompleting
                     ? "Already downloaded"
                     : hasUpdateAvailable
                       ? "Update available"
@@ -732,13 +764,13 @@ const AddonLibraryPage = () => {
                         type="button"
                         className={`icon-action ${actionClassName}`}
                         onClick={() => void handleDownload(result)}
-                        disabled={!result.latestFileId || downloadingFileId !== null || isCurrentFileDownloaded}
+                        disabled={downloadingProjectId !== null || isCurrentReleaseDownloaded}
                         aria-label={actionLabel}
                         title={actionTitle}
                       >
-                        {downloadingFileId === result.latestFileId ? (
+                        {isDownloading ? (
                           <LoaderCircle className="icon-action-spinner" aria-hidden="true" />
-                        ) : isCurrentFileDownloaded || isCompleting ? (
+                        ) : isCurrentReleaseDownloaded || isCompleting ? (
                           <CheckCircle2 aria-hidden="true" />
                         ) : hasUpdateAvailable ? (
                           <RefreshCw aria-hidden="true" />
@@ -785,8 +817,13 @@ const AddonLibraryPage = () => {
                   </span>
                   <span role="cell">{formatNumber(addon.registeredInstanceCount)}</span>
                   <span className="instance-addon-file" role="cell">
-                    <span>{addon.fileDisplayName ?? addon.fileName ?? "Unknown file"}</span>
+                    <span>
+                      {addon.downloadedFileCount > 1
+                        ? `${addon.downloadedFileCount} CurseForge files`
+                        : addon.fileDisplayName ?? addon.fileName ?? "Unknown file"}
+                    </span>
                     <small>{addon.fileDate ? formatTimestamp(addon.fileDate) : "No file date"}</small>
+                    {addon.downloadedFileErrorCount > 0 ? <small>{addon.downloadedFileErrorCount} file error</small> : null}
                   </span>
                   <span role="cell">{getAddonPackSummary(addon)}</span>
                   <span role="cell">
@@ -855,20 +892,57 @@ const AddonLibraryPage = () => {
                       <p className="muted-copy">No instances are available yet.</p>
                     ) : (
                       <div className="addon-selector-list addon-library-instance-selector">
-                        {addonEditorData.instances.map((instance) => (
-                          <label key={instance.instanceId} className="addon-selector-item">
-                            <input
-                              type="checkbox"
-                              checked={selectedLinkedInstanceIds.includes(instance.instanceId)}
-                              disabled={addonEditorSaving}
-                              onChange={() => toggleLinkedInstance(instance.instanceId)}
-                            />
-                            <span>
-                              <strong>{instance.friendlyName}</strong>
-                              <small>{formatLabel(instance.status)}</small>
-                            </span>
-                          </label>
-                        ))}
+                        {addonEditorData.instances.map((instance) => {
+                          const isLinked = selectedLinkedInstanceIds.includes(instance.instanceId);
+                          const isEnabled = instance.addonStatus === "enabled";
+                          const actionKey = `${isEnabled ? "disable" : "enable"}:${instance.instanceId}`;
+                          const canChangeEnablement =
+                            isLinked &&
+                            instance.linked &&
+                            instance.addonId !== undefined &&
+                            instance.addonStatus !== "error" &&
+                            instance.status === "stopped" &&
+                            !addonEditorSaving &&
+                            linkedInstanceAddonAction === "";
+
+                          return (
+                            <article key={instance.instanceId} className="addon-selector-item addon-library-instance-row">
+                              <label className="addon-library-instance-link">
+                                <input
+                                  type="checkbox"
+                                  checked={isLinked}
+                                  disabled={addonEditorSaving || linkedInstanceAddonAction !== ""}
+                                  onChange={() => toggleLinkedInstance(instance.instanceId)}
+                                />
+                                <span>
+                                  <strong>{instance.friendlyName}</strong>
+                                  <small>{formatLabel(instance.status)}</small>
+                                </span>
+                              </label>
+                              {isLinked && instance.linked ? (
+                                <button
+                                  type="button"
+                                  className={isEnabled ? "toggle-switch active" : "toggle-switch"}
+                                  aria-pressed={isEnabled}
+                                  aria-label={`${isEnabled ? "Disable" : "Enable"} ${addonEditorData.addon.name} on ${instance.friendlyName}`}
+                                  title={
+                                    instance.status === "stopped"
+                                      ? `${isEnabled ? "Disable" : "Enable"} addon`
+                                      : "Stop this instance before changing addon enablement."
+                                  }
+                                  onClick={() => void handleLinkedInstanceAddonEnablement(instance)}
+                                  disabled={!canChangeEnablement}
+                                >
+                                  {linkedInstanceAddonAction === actionKey ? (
+                                    <LoaderCircle className="icon-action-spinner" aria-hidden="true" />
+                                  ) : (
+                                    <span className="toggle-switch-thumb" />
+                                  )}
+                                </button>
+                              ) : null}
+                            </article>
+                          );
+                        })}
                       </div>
                     )}
                   </section>

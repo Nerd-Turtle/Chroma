@@ -28,3 +28,34 @@ export function getCurseForgeAddonStoragePaths(projectId: number, fileId: number
     extractedPath,
   };
 }
+
+export function getCurseForgeAddonReleaseStoragePaths(projectId: number, releaseFileId: number) {
+  const projectPath = join(getAddonDownloadBasePath(), "curseforge", "projects", String(projectId));
+  const workspacePath = join(projectPath, "releases", String(releaseFileId));
+
+  return {
+    projectPath,
+    workspacePath,
+  };
+}
+
+export function getCurseForgeAddonReleaseFileStoragePaths(
+  projectId: number,
+  releaseFileId: number,
+  fileId: number,
+  fileName: string,
+) {
+  const releasePaths = getCurseForgeAddonReleaseStoragePaths(projectId, releaseFileId);
+  const filePath = join(releasePaths.workspacePath, "files", String(fileId));
+  const archiveDirectory = join(filePath, "archive");
+  const archivePath = join(archiveDirectory, sanitizeAddonPathPart(fileName));
+  const extractedPath = join(filePath, "extracted");
+
+  return {
+    ...releasePaths,
+    filePath,
+    archiveDirectory,
+    archivePath,
+    extractedPath,
+  };
+}

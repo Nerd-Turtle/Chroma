@@ -37,6 +37,10 @@ export type CurseForgeModFile = {
   fileLength?: number;
   downloadUrl?: string;
   gameVersions?: string[];
+  dependencies?: Array<{
+    modId?: number;
+    relationType?: number;
+  }>;
 };
 
 export type CurseForgeMod = {
@@ -141,6 +145,30 @@ export class CurseForgeClient {
   async getModFile(modId: number, fileId: number): Promise<CurseForgeModFile> {
     const response = await this.get<CurseForgeApiResponse<CurseForgeModFile>>(`/v1/mods/${modId}/files/${fileId}`, {});
     return response.data;
+  }
+
+  async getModFiles(modId: number): Promise<CurseForgeModFile[]> {
+    const files: CurseForgeModFile[] = [];
+    const pageSize = 50;
+    let index = 0;
+
+    while (true) {
+      const response = await this.get<CurseForgeApiResponse<CurseForgeModFile[]>>(`/v1/mods/${modId}/files`, {
+        index: String(index),
+        pageSize: String(pageSize),
+      });
+      files.push(...response.data);
+
+      const resultCount = response.pagination?.resultCount ?? response.data.length;
+      const totalCount = response.pagination?.totalCount ?? files.length;
+      if (resultCount === 0 || files.length >= totalCount) {
+        break;
+      }
+
+      index += resultCount;
+    }
+
+    return files;
   }
 
   async getModFileDownloadUrl(modId: number, fileId: number): Promise<string> {

@@ -8,6 +8,8 @@ export type InstanceAddonPackType = "behavior" | "resource" | "skin" | "unknown"
 
 export type InstanceAddonPackStatus = "downloaded" | "enabled" | "disabled" | "unsupported" | "error";
 
+export type AddonDownloadedFileStatus = "downloaded" | "error" | "skipped";
+
 export type CurseForgeAddonSearchSort = "relevance" | "popularity" | "last_updated" | "total_downloads" | "released_date" | "rating";
 
 export type InstanceAddonPackCounts = {
@@ -37,6 +39,8 @@ export type AddonLibraryItem = {
   extractedPath?: string;
   error?: string;
   packCounts: InstanceAddonPackCounts;
+  downloadedFileCount: number;
+  downloadedFileErrorCount: number;
   registeredInstanceCount: number;
   createdAt: string;
   updatedAt: string;
@@ -66,6 +70,8 @@ export type InstanceAddon = {
   extractedPath?: string;
   error?: string;
   packCounts: InstanceAddonPackCounts;
+  downloadedFileCount: number;
+  downloadedFileErrorCount: number;
   createdAt: string;
   updatedAt: string;
 };
@@ -86,6 +92,23 @@ export type InstanceAddonPack = {
   status: InstanceAddonPackStatus;
   enabledAt?: string;
   disabledAt?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AddonDownloadedFile = {
+  id: string;
+  addonFileId: string;
+  providerFileId: string;
+  fileName: string;
+  fileDisplayName?: string;
+  fileDate?: string;
+  downloadCount?: number;
+  fileLength?: number;
+  archivePath?: string;
+  extractedPath?: string;
+  status: AddonDownloadedFileStatus;
+  error?: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -145,4 +168,6 @@ export type AddonLibraryLinkedInstance = {
   status: InstanceStatus;
   linked: boolean;
   autoUpdateEnabled: boolean;
+  addonId?: string;
+  addonStatus?: InstanceAddonStatus;
 };

@@ -17,6 +17,7 @@ import {
   getAddonFile,
   getAddonFileByProviderFile,
   getNextInstanceAddonSortOrder,
+  listAddonFileDownloads,
   listAddonFiles,
   listAddonFilePacks,
   listAddonLibraryLinkedInstances,
@@ -28,23 +29,30 @@ import {
   saveInstanceAddonWithPacks,
   updateInstanceAddonAutoUpdate,
   type SaveAddonFileInput,
+  type SaveAddonFileDownloadInput,
   type SaveAddonFilePackInput,
   type SaveInstanceAddonInput,
   type SaveInstanceAddonPackInput,
 } from "./addonRepository.js";
 import { inspectAddonArchive } from "./addonArchiveService.js";
 import type { DiscoveredAddonPack } from "./addonArchiveService.js";
-import { CurseForgeClient, type CurseForgeMod } from "./curseForgeClient.js";
-import { getCurseForgeAddonStoragePaths } from "./addonStoragePaths.js";
+import { CurseForgeClient, type CurseForgeMod, type CurseForgeModFile } from "./curseForgeClient.js";
+import { getCurseForgeAddonReleaseFileStoragePaths, getCurseForgeAddonReleaseStoragePaths } from "./addonStoragePaths.js";
 
 function getTotalPackCount(addonFile: AddonLibraryItem): number {
   return addonFile.packCounts.behavior + addonFile.packCounts.resource + addonFile.packCounts.skin + addonFile.packCounts.unknown;
 }
 
-function mapDiscoveredAddonFilePack(addonFileId: string, pack: DiscoveredAddonPack, now: string): SaveAddonFilePackInput {
+function mapDiscoveredAddonFilePack(
+  addonFileId: string,
+  pack: DiscoveredAddonPack,
+  now: string,
+  addonFileDownloadId?: string,
+): SaveAddonFilePackInput {
   const savedPack: SaveAddonFilePackInput = {
     id: createId("afpack"),
     addonFileId,
+    ...(addonFileDownloadId ? { addonFileDownloadId } : {}),
     packType: pack.packType,
     headerUuid: pack.headerUuid,
     headerVersionJson: JSON.stringify(pack.headerVersion),
@@ -68,7 +76,7 @@ async function repairAddonLibraryFileIfNeeded(db: Database, addonFileId: string)
   }
 
   if (getTotalPackCount(addonFile) > 0) {
-    if (addonFile.error) {
+    if (addonFile.error && addonFile.downloadedFileCount === 0) {
       const now = new Date().toISOString();
       markAddonFileRecovered(db, addonFile.id, now);
       return getAddonFile(db, addonFileId) ?? addonFile;
@@ -168,6 +176,7 @@ async function buildInstanceAddonPacksFromLibraryFile(
     status: "downloaded",
     createdAt: now,
     updatedAt: now,
+    ...(pack.addonFileDownloadId ? { addonFileDownloadId: pack.addonFileDownloadId } : {}),
     ...(pack.name ? { name: pack.name } : {}),
     ...(pack.description ? { description: pack.description } : {}),
     ...(pack.minEngineVersionJson ? { minEngineVersionJson: pack.minEngineVersionJson } : {}),
@@ -224,7 +233,7 @@ export async function getAddonDetailForInstance(
   db: Database,
   instanceId: string,
   addonId: string,
-): Promise<{ addon: InstanceAddon; packs: InstanceAddonPack[] }> {
+): Promise<{ addon: InstanceAddon; downloadedFiles: ReturnType<typeof listAddonFileDownloads>; packs: InstanceAddonPack[] }> {
   const instance = getInstance(db, instanceId);
   if (!instance) {
     throw new Error("Instance not found");
@@ -239,6 +248,7 @@ export async function getAddonDetailForInstance(
 
   return {
     addon,
+    downloadedFiles: listAddonFileDownloads(db, addon.addonFileId),
     packs: listInstanceAddonPacks(db, instanceId, addonId),
   };
 }
@@ -246,11 +256,12 @@ export async function getAddonDetailForInstance(
 export async function getAddonLibraryEditor(
   db: Database,
   addonFileId: string,
-): Promise<{ addon: AddonLibraryItem; instances: AddonLibraryLinkedInstance[] }> {
+): Promise<{ addon: AddonLibraryItem; downloadedFiles: ReturnType<typeof listAddonFileDownloads>; instances: AddonLibraryLinkedInstance[] }> {
   const addon = await repairAddonLibraryFileIfNeeded(db, addonFileId);
 
   return {
     addon,
+    downloadedFiles: listAddonFileDownloads(db, addonFileId),
     instances: listAddonLibraryLinkedInstances(db, addonFileId),
   };
 }
@@ -259,7 +270,7 @@ export async function updateAddonLibraryLinks(
   db: Database,
   addonFileId: string,
   links: Array<{ instanceId: string; autoUpdateEnabled: boolean }>,
-): Promise<{ addon: AddonLibraryItem; instances: AddonLibraryLinkedInstance[] }> {
+): Promise<{ addon: AddonLibraryItem; downloadedFiles: ReturnType<typeof listAddonFileDownloads>; instances: AddonLibraryLinkedInstance[] }> {
   const addonFile = await repairAddonLibraryFileIfNeeded(db, addonFileId);
 
   const uniqueLinks = new Map<string, boolean>();
@@ -409,48 +420,198 @@ export async function selectLibraryAddonsForInstance(
 
 export type DownloadCurseForgeAddonInput = {
   projectId: number;
-  fileId: number;
+  fileId?: number;
 };
 
-async function fetchCurseForgeAddonFile(db: Database, input: DownloadCurseForgeAddonInput) {
+type InspectedCurseForgeAddonPack = {
+  pack: DiscoveredAddonPack;
+  addonFileDownloadId: string;
+};
+
+type DownloadedCurseForgeAddonFile = {
+  file: CurseForgeModFile;
+  download: SaveAddonFileDownloadInput;
+};
+
+function hasNormalizedCurseForgeFiles(addon: AddonLibraryItem | InstanceAddon | undefined): boolean {
+  return Boolean(addon && !addon.error && addon.downloadedFileCount > 0);
+}
+
+function isBedrockAddonArchive(file: CurseForgeModFile): boolean {
+  const fileName = file.fileName.toLowerCase();
+  return fileName.endsWith(".mcpack") || fileName.endsWith(".mcaddon") || fileName.endsWith(".zip");
+}
+
+function getFileDay(file: CurseForgeModFile): string {
+  return file.fileDate.slice(0, 10);
+}
+
+function getFileVersionTokens(file: CurseForgeModFile): string[] {
+  const source = `${file.displayName} ${file.fileName}`.toLowerCase();
+  const matches = source.match(/v?\d+(?:\.\d+){1,3}/g) ?? [];
+  return [...new Set(matches.map((match) => match.replace(/^v/, "")))];
+}
+
+function hasSharedGameVersion(left: CurseForgeModFile, right: CurseForgeModFile): boolean {
+  const leftVersions = new Set(left.gameVersions ?? []);
+  return (right.gameVersions ?? []).some((version) => leftVersions.has(version));
+}
+
+function compareCurseForgeFileDateDesc(left: CurseForgeModFile, right: CurseForgeModFile): number {
+  const dateDifference = Date.parse(right.fileDate) - Date.parse(left.fileDate);
+  return dateDifference !== 0 ? dateDifference : right.id - left.id;
+}
+
+function selectCurseForgeReleaseFiles(
+  mod: CurseForgeMod,
+  files: CurseForgeModFile[],
+  requestedFileId: number | undefined,
+): { releaseFileId: number; files: CurseForgeModFile[] } {
+  const installableFiles = files
+    .filter((file) => file.isAvailable !== false)
+    .filter(isBedrockAddonArchive)
+    .sort(compareCurseForgeFileDateDesc);
+
+  if (installableFiles.length === 0) {
+    throw new Error("CurseForge did not return any Bedrock addon files for this project.");
+  }
+
+  const anchor =
+    (requestedFileId ? installableFiles.find((file) => file.id === requestedFileId) : undefined) ??
+    (mod.mainFileId ? installableFiles.find((file) => file.id === mod.mainFileId) : undefined) ??
+    installableFiles[0];
+  if (!anchor) {
+    throw new Error("CurseForge did not return a selectable addon file.");
+  }
+
+  const anchorDay = getFileDay(anchor);
+  const anchorVersionTokens = new Set(getFileVersionTokens(anchor));
+  const releaseFiles = installableFiles.filter((file) => {
+    if (file.id === anchor.id) return true;
+    if (getFileDay(file) !== anchorDay) return false;
+
+    const fileVersionTokens = getFileVersionTokens(file);
+    if (anchorVersionTokens.size > 0) {
+      return fileVersionTokens.some((token) => anchorVersionTokens.has(token));
+    }
+
+    return hasSharedGameVersion(anchor, file);
+  });
+
+  return {
+    releaseFileId: anchor.id,
+    files: releaseFiles.sort((left, right) => left.fileName.localeCompare(right.fileName)),
+  };
+}
+
+function buildMissingDependencyMessage(packs: InspectedCurseForgeAddonPack[]): string | undefined {
+  const discoveredPackUuids = new Set(packs.map(({ pack }) => pack.headerUuid.toLowerCase()));
+  const missingDependencyUuids = new Set<string>();
+  for (const { pack } of packs) {
+    for (const dependencyUuid of pack.dependencyUuids) {
+      if (!discoveredPackUuids.has(dependencyUuid.toLowerCase())) {
+        missingDependencyUuids.add(dependencyUuid);
+      }
+    }
+  }
+
+  if (missingDependencyUuids.size === 0) {
+    return undefined;
+  }
+
+  return `Missing required pack dependencies: ${[...missingDependencyUuids].join(", ")}`;
+}
+
+async function fetchCurseForgeAddonProject(db: Database, input: DownloadCurseForgeAddonInput) {
   const apiKey = getCurseForgeApiKey(db);
   if (!apiKey) {
     throw new Error("CurseForge API key is not configured");
   }
 
   const client = new CurseForgeClient(apiKey);
-  const [mod, file] = await Promise.all([
+  const [mod, projectFiles] = await Promise.all([
     client.getMod(input.projectId),
-    client.getModFile(input.projectId, input.fileId),
+    client.getModFiles(input.projectId),
   ]);
+  const selectedRelease = selectCurseForgeReleaseFiles(mod, projectFiles, input.fileId);
+  const releasePaths = getCurseForgeAddonReleaseStoragePaths(input.projectId, selectedRelease.releaseFileId);
+  const downloadedFiles: DownloadedCurseForgeAddonFile[] = [];
+  const discoveredPacks: InspectedCurseForgeAddonPack[] = [];
+  const fileErrors: string[] = [];
+  const now = new Date().toISOString();
 
-  const paths = getCurseForgeAddonStoragePaths(input.projectId, input.fileId, file.fileName);
-  if (!existsSync(paths.archivePath)) {
-    const downloadUrl = await client.getModFileDownloadUrl(input.projectId, input.fileId);
-    if (!downloadUrl) {
-      throw new Error("CurseForge did not provide a download URL for this file.");
+  for (const file of selectedRelease.files) {
+    const paths = getCurseForgeAddonReleaseFileStoragePaths(input.projectId, selectedRelease.releaseFileId, file.id, file.fileName);
+    const downloadId = createId("afd");
+    let status: SaveAddonFileDownloadInput["status"] = "downloaded";
+    let error: string | undefined;
+    let filePacks: DiscoveredAddonPack[] = [];
+
+    try {
+      if (!existsSync(paths.archivePath)) {
+        const downloadUrl = await client.getModFileDownloadUrl(input.projectId, file.id);
+        if (!downloadUrl) {
+          throw new Error("CurseForge did not provide a download URL for this file.");
+        }
+
+        await mkdir(paths.archiveDirectory, { recursive: true });
+        await downloadFile(downloadUrl, paths.archivePath);
+      }
+
+      filePacks = await inspectAddonArchive(paths.archivePath, paths.extractedPath);
+      if (filePacks.length === 0) {
+        throw new Error("No Bedrock pack manifests were discovered in this CurseForge file.");
+      }
+    } catch (fileError) {
+      status = "error";
+      error = fileError instanceof Error ? fileError.message : String(fileError);
+      fileErrors.push(`${file.fileName}: ${error}`);
     }
 
-    await mkdir(paths.archiveDirectory, { recursive: true });
-    await downloadFile(downloadUrl, paths.archivePath);
+    const download: SaveAddonFileDownloadInput = {
+      id: downloadId,
+      addonFileId: "",
+      providerFileId: String(file.id),
+      fileName: file.fileName,
+      status,
+      archivePath: paths.archivePath,
+      extractedPath: paths.extractedPath,
+      providerMetadataJson: JSON.stringify(file),
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    if (file.displayName) download.fileDisplayName = file.displayName;
+    if (file.fileDate) download.fileDate = file.fileDate;
+    if (typeof file.downloadCount === "number") download.downloadCount = file.downloadCount;
+    if (typeof file.fileLength === "number") download.fileLength = file.fileLength;
+    if (error) download.error = error;
+
+    downloadedFiles.push({ file, download });
+    for (const pack of filePacks) {
+      discoveredPacks.push({ pack, addonFileDownloadId: downloadId });
+    }
   }
 
-  let error: string | undefined;
-  let discoveredPacks: DiscoveredAddonPack[] = [];
-
-  try {
-    discoveredPacks = await inspectAddonArchive(paths.archivePath, paths.extractedPath);
-    if (discoveredPacks.length === 0) {
-      error = "No Bedrock pack manifests were discovered in the downloaded archive.";
-    }
-  } catch (inspectionError) {
-    error = inspectionError instanceof Error ? inspectionError.message : String(inspectionError);
+  const missingDependencyError = buildMissingDependencyMessage(discoveredPacks);
+  const error =
+    discoveredPacks.length === 0
+      ? fileErrors[0] ?? "No Bedrock pack manifests were discovered in the selected CurseForge files."
+      : fileErrors.length > 0
+        ? `Some CurseForge files failed: ${fileErrors.join("; ")}`
+        : missingDependencyError;
+  const primaryFile = selectedRelease.files.find((file) => file.id === selectedRelease.releaseFileId) ?? selectedRelease.files[0];
+  if (!primaryFile) {
+    throw new Error("CurseForge did not return a primary addon file.");
   }
 
   return {
     mod,
-    file,
-    paths,
+    file: primaryFile,
+    releaseFileId: selectedRelease.releaseFileId,
+    releasePaths,
+    files: selectedRelease.files,
+    downloadedFiles,
     error,
     discoveredPacks,
   };
@@ -500,27 +661,40 @@ export async function downloadCurseForgeAddonForInstance(
   db: Database,
   instanceId: string,
   input: DownloadCurseForgeAddonInput,
-): Promise<{ addon: InstanceAddon; packs: InstanceAddonPack[] }> {
+): Promise<{ addon: InstanceAddon; downloadedFiles: ReturnType<typeof listAddonFileDownloads>; packs: InstanceAddonPack[] }> {
   const instance = getInstance(db, instanceId);
   if (!instance) {
     throw new Error("Instance not found");
   }
 
-  const existingAddon = getInstanceAddonByProviderFile(db, instanceId, "curseforge", String(input.projectId), String(input.fileId));
-  if (existingAddon) {
+  const existingAddon = input.fileId
+    ? getInstanceAddonByProviderFile(db, instanceId, "curseforge", String(input.projectId), String(input.fileId))
+    : undefined;
+  if (existingAddon && hasNormalizedCurseForgeFiles(existingAddon)) {
     return await getAddonDetailForInstance(db, instanceId, existingAddon.id);
   }
+  if (existingAddon?.status === "enabled") {
+    throw new Error(`Disable ${existingAddon.name} before refreshing its CurseForge files.`);
+  }
 
-  const { mod, file, paths, error, discoveredPacks } = await fetchCurseForgeAddonFile(db, input);
+  const { mod, file, releaseFileId, releasePaths, files, downloadedFiles, error, discoveredPacks } = await fetchCurseForgeAddonProject(db, input);
+  const existingReleaseAddon = getInstanceAddonByProviderFile(db, instanceId, "curseforge", String(input.projectId), String(releaseFileId));
+  if (existingReleaseAddon && hasNormalizedCurseForgeFiles(existingReleaseAddon)) {
+    return await getAddonDetailForInstance(db, instanceId, existingReleaseAddon.id);
+  }
+  if (existingReleaseAddon?.status === "enabled") {
+    throw new Error(`Disable ${existingReleaseAddon.name} before refreshing its CurseForge files.`);
+  }
+
   const now = new Date().toISOString();
-  const addonId = createId("addon");
-  const addonFileId = createId("afile");
+  const addonId = existingReleaseAddon?.id ?? existingAddon?.id ?? createId("addon");
+  const addonFileId = existingReleaseAddon?.addonFileId ?? existingAddon?.addonFileId ?? createId("afile");
   let status: SaveInstanceAddonInput["status"] = "downloaded";
   if (error) {
     status = "error";
   }
 
-  const searchResult = mapModToSearchResult(mod, input.fileId);
+  const searchResult = mapModToSearchResult(mod, releaseFileId);
   const addon: SaveInstanceAddonInput = {
     id: addonId,
     instanceId,
@@ -529,13 +703,11 @@ export async function downloadCurseForgeAddonForInstance(
     autoUpdateEnabled: true,
     provider: "curseforge",
     providerProjectId: String(input.projectId),
-    providerFileId: String(input.fileId),
+    providerFileId: String(releaseFileId),
     name: mod.name,
     status,
-    workspacePath: paths.workspacePath,
-    archivePath: paths.archivePath,
-    extractedPath: paths.extractedPath,
-    providerMetadataJson: JSON.stringify({ project: searchResult, file }),
+    workspacePath: releasePaths.workspacePath,
+    providerMetadataJson: JSON.stringify({ project: searchResult, releaseFileId, selectedFiles: files, primaryFile: file }),
     ...(error ? { error } : {}),
     createdAt: now,
     updatedAt: now,
@@ -551,12 +723,17 @@ export async function downloadCurseForgeAddonForInstance(
   if (file.fileDate) addon.fileDate = file.fileDate;
   addon.downloadCount = file.downloadCount ?? mod.downloadCount;
 
-  const packs: SaveInstanceAddonPackInput[] = discoveredPacks.map((pack) => {
+  const downloads: SaveAddonFileDownloadInput[] = downloadedFiles.map(({ download }) => ({
+    ...download,
+    addonFileId,
+  }));
+  const packs: SaveInstanceAddonPackInput[] = discoveredPacks.map(({ pack, addonFileDownloadId }) => {
     const savedPack: SaveInstanceAddonPackInput = {
       id: createId("pack"),
       instanceId,
       addonId,
       addonFilePackId: createId("afpack"),
+      addonFileDownloadId,
       packType: pack.packType,
       headerUuid: pack.headerUuid,
       headerVersionJson: JSON.stringify(pack.headerVersion),
@@ -574,7 +751,7 @@ export async function downloadCurseForgeAddonForInstance(
     return savedPack;
   });
 
-  saveInstanceAddonWithPacks(db, addon, packs);
+  saveInstanceAddonWithPacks(db, addon, packs, downloads);
 
   await appendInstanceRuntimeEvent(db, instanceId, {
     category: "settings",
@@ -584,7 +761,8 @@ export async function downloadCurseForgeAddonForInstance(
     details: {
       provider: "curseforge",
       projectId: input.projectId,
-      fileId: input.fileId,
+      releaseFileId,
+      fileCount: downloads.length,
       packCount: packs.length,
     },
   });
@@ -596,24 +774,29 @@ export async function downloadCurseForgeAddonToLibrary(
   db: Database,
   input: DownloadCurseForgeAddonInput,
 ): Promise<{ addon: AddonLibraryItem }> {
-  const existingAddon = getAddonFileByProviderFile(db, "curseforge", String(input.projectId), String(input.fileId));
-  if (existingAddon && !existingAddon.error) {
+  const existingAddon = input.fileId
+    ? getAddonFileByProviderFile(db, "curseforge", String(input.projectId), String(input.fileId))
+    : undefined;
+  if (existingAddon && hasNormalizedCurseForgeFiles(existingAddon)) {
     return { addon: existingAddon };
   }
 
-  const { mod, file, paths, error, discoveredPacks } = await fetchCurseForgeAddonFile(db, input);
+  const { mod, file, releaseFileId, releasePaths, files, downloadedFiles, error, discoveredPacks } = await fetchCurseForgeAddonProject(db, input);
+  const existingReleaseAddon = getAddonFileByProviderFile(db, "curseforge", String(input.projectId), String(releaseFileId));
+  if (existingReleaseAddon && hasNormalizedCurseForgeFiles(existingReleaseAddon)) {
+    return { addon: existingReleaseAddon };
+  }
+
   const now = new Date().toISOString();
-  const searchResult = mapModToSearchResult(mod, input.fileId);
+  const searchResult = mapModToSearchResult(mod, releaseFileId);
   const addon: SaveAddonFileInput = {
-    id: existingAddon?.id ?? createId("afile"),
+    id: existingReleaseAddon?.id ?? existingAddon?.id ?? createId("afile"),
     provider: "curseforge",
     providerProjectId: String(input.projectId),
-    providerFileId: String(input.fileId),
+    providerFileId: String(releaseFileId),
     name: mod.name,
-    workspacePath: paths.workspacePath,
-    archivePath: paths.archivePath,
-    extractedPath: paths.extractedPath,
-    providerMetadataJson: JSON.stringify({ project: searchResult, file }),
+    workspacePath: releasePaths.workspacePath,
+    providerMetadataJson: JSON.stringify({ project: searchResult, releaseFileId, selectedFiles: files, primaryFile: file }),
     ...(error ? { error } : {}),
     createdAt: now,
     updatedAt: now,
@@ -629,11 +812,17 @@ export async function downloadCurseForgeAddonToLibrary(
   if (file.fileDate) addon.fileDate = file.fileDate;
   addon.downloadCount = file.downloadCount ?? mod.downloadCount;
 
-  const packs: SaveAddonFilePackInput[] = discoveredPacks.map((pack) => mapDiscoveredAddonFilePack(addon.id, pack, now));
+  const downloads: SaveAddonFileDownloadInput[] = downloadedFiles.map(({ download }) => ({
+    ...download,
+    addonFileId: addon.id,
+  }));
+  const packs: SaveAddonFilePackInput[] = discoveredPacks.map(({ pack, addonFileDownloadId }) =>
+    mapDiscoveredAddonFilePack(addon.id, pack, now, addonFileDownloadId),
+  );
 
-  saveAddonFileWithPacks(db, addon, packs);
+  saveAddonFileWithPacks(db, addon, packs, downloads);
 
-  const savedAddon = getAddonFileByProviderFile(db, "curseforge", String(input.projectId), String(input.fileId));
+  const savedAddon = getAddonFileByProviderFile(db, "curseforge", String(input.projectId), String(releaseFileId));
   if (!savedAddon) {
     throw new Error("Downloaded addon was not saved in the library.");
   }

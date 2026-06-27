@@ -12,6 +12,7 @@ export type DiscoveredAddonPack = {
   headerUuid: string;
   headerVersion: number[];
   minEngineVersion?: number[];
+  dependencyUuids: string[];
   sourcePath: string;
   manifestJson: string;
 };
@@ -26,6 +27,9 @@ type BedrockManifest = {
   };
   modules?: Array<{
     type?: unknown;
+  }>;
+  dependencies?: Array<{
+    uuid?: unknown;
   }>;
 };
 
@@ -344,6 +348,17 @@ function classifyPackType(manifest: BedrockManifest): InstanceAddonPackType {
   return "unknown";
 }
 
+function parseDependencyUuids(manifest: BedrockManifest): string[] {
+  const uuids = new Set<string>();
+  for (const dependency of manifest.dependencies ?? []) {
+    if (typeof dependency.uuid === "string" && UUID_PATTERN.test(dependency.uuid)) {
+      uuids.add(dependency.uuid);
+    }
+  }
+
+  return [...uuids];
+}
+
 async function parseManifest(manifestPath: string): Promise<DiscoveredAddonPack> {
   const manifestJson = await readFile(manifestPath, "utf8");
   const normalizedManifestJson = stripJsonComments(manifestJson.replace(/^\uFEFF/, ""));
@@ -383,6 +398,7 @@ async function parseManifest(manifestPath: string): Promise<DiscoveredAddonPack>
     status: packType === "unknown" ? "unsupported" : "downloaded",
     headerUuid,
     headerVersion,
+    dependencyUuids: parseDependencyUuids(manifest),
     sourcePath: dirname(manifestPath),
     manifestJson: persistedManifestJson,
   };
