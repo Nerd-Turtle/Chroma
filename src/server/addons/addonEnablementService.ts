@@ -6,6 +6,7 @@ import { getBdsRuntimeState } from "../bds/bdsRuntimeService.js";
 import { createInternalRevertBackup } from "../instances/instanceBackupService.js";
 import { appendInstanceRuntimeEvent } from "../instances/instanceRuntimeEventService.js";
 import { getInstance } from "../instances/instanceService.js";
+import { getRuntimePaths } from "../config/paths.js";
 import { getAddonDetailForInstance, listAddonsForInstance } from "./addonService.js";
 import { listInstanceAddonPacks, updateInstanceAddonEnablement, updateInstanceAddonSortOrders } from "./addonRepository.js";
 import { getAddonDownloadBasePath } from "./addonStoragePaths.js";
@@ -15,11 +16,35 @@ type WorldPackReference = {
   version: number[];
 };
 
+const legacyDevelopmentDataPrefix = ".runtime/var/lib/chroma/";
+
+function resolveRuntimeManagedPath(path: string): string {
+  if (isAbsolute(path)) {
+    return resolve(path);
+  }
+
+  const normalizedPath = path.replaceAll("\\", "/");
+  if (normalizedPath === ".runtime/var/lib/chroma") {
+    return getRuntimePaths().dataDir;
+  }
+  if (normalizedPath.startsWith(legacyDevelopmentDataPrefix)) {
+    return resolve(getRuntimePaths().dataDir, normalizedPath.slice(legacyDevelopmentDataPrefix.length));
+  }
+
+  return resolve(path);
+}
+
 function assertChildPath(parentPath: string, childPath: string): void {
-  const relativePath = relative(resolve(parentPath), resolve(childPath));
+  const relativePath = relative(resolveRuntimeManagedPath(parentPath), resolveRuntimeManagedPath(childPath));
   if (relativePath === "" || relativePath.startsWith("..") || isAbsolute(relativePath)) {
     throw new Error("Resolved addon path is outside the expected instance directory.");
   }
+}
+
+function resolveAddonSourcePath(sourcePath: string): string {
+  const resolvedPath = resolveRuntimeManagedPath(sourcePath);
+  assertChildPath(getAddonDownloadBasePath(), resolvedPath);
+  return resolvedPath;
 }
 
 async function pathExists(path: string): Promise<boolean> {
@@ -298,8 +323,8 @@ export async function enableAddonForInstance(db: Database, instanceId: string, a
       throw new Error(`Imported pack folder already exists: ${importedPath}`);
     }
 
-    assertChildPath(getAddonDownloadBasePath(), pack.sourcePath);
-    await copyDirectoryRecursive(pack.sourcePath, importedPath);
+    const sourcePath = resolveAddonSourcePath(pack.sourcePath);
+    await copyDirectoryRecursive(sourcePath, importedPath);
 
     if (pack.packType === "behavior") {
       behaviorReferences = addWorldPackReference(behaviorReferences, pack);
@@ -369,8 +394,9 @@ export async function disableAddonForInstance(db: Database, instanceId: string, 
       const expectedRoot = pack.packType === "behavior"
         ? join(instance.instancePath, "bds", "behavior_packs")
         : join(instance.instancePath, "bds", "resource_packs");
-      assertChildPath(expectedRoot, pack.enabledPath);
-      await rm(pack.enabledPath, { recursive: true, force: true });
+      const enabledPath = resolveRuntimeManagedPath(pack.enabledPath);
+      assertChildPath(expectedRoot, enabledPath);
+      await rm(enabledPath, { recursive: true, force: true });
     }
 
     packUpdates.push({

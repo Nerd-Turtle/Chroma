@@ -65,11 +65,12 @@ body.is-resizing {
 }
 
 .brand-mark {
-  width: 2.2rem;
-  height: 2.2rem;
-  border-radius: 0.8rem;
-  background: linear-gradient(135deg, #74d8ff 0%, #a77cff 48%, #ffca6d 100%);
-  box-shadow: 0 0 32px rgba(110, 194, 255, 0.28);
+  display: block;
+  width: 2.45rem;
+  height: 2.45rem;
+  border-radius: 0.85rem;
+  object-fit: contain;
+  box-shadow: 0 0 30px rgba(62, 180, 255, 0.24);
 }
 
 .brand-name {

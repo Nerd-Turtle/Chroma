@@ -12,7 +12,7 @@ const TopNav = ({ authenticated, activePage, user, onLogout, onNavigate }: TopNa
   return (
     <header className="top-nav">
       <div className="brand-lockup">
-        <div className="brand-mark" aria-hidden="true" />
+        <img className="brand-mark" src="/Chroma-logo.png" alt="" aria-hidden="true" />
         <div>
           <div className="brand-name">Chroma</div>
           <div className="brand-subtitle">Server Manager</div>
