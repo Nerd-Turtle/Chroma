@@ -33,6 +33,10 @@ import type {
   LatestBdsVersionResponse,
   LoginRequest,
   LoginResponse,
+  GeneratePkiCsrRequest,
+  GeneratePkiCsrResponse,
+  InstallPkiCertificateResponse,
+  PkiStatusResponse,
   SetupCompleteRequest,
   SetupStatusResponse,
   UpdateAppSettingsRequest,
@@ -140,6 +144,29 @@ export async function updateAppSettings(payload: UpdateAppSettingsRequest): Prom
   });
 
   return readJson<AppSettingsResponse>(response);
+}
+
+export async function getPkiStatus(): Promise<PkiStatusResponse> {
+  const response = await fetch("/api/pki/status");
+  return readJson<PkiStatusResponse>(response);
+}
+
+export async function generatePkiCsr(payload: GeneratePkiCsrRequest): Promise<GeneratePkiCsrResponse> {
+  const response = await fetch("/api/pki/csr", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return readJson<GeneratePkiCsrResponse>(response);
+}
+
+export async function installPkiCertificate(certificatePem: string): Promise<InstallPkiCertificateResponse> {
+  const response = await fetch("/api/pki/certificate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ certificatePem }),
+  });
+  return readJson<InstallPkiCertificateResponse>(response);
 }
 
 export async function getInstances(): Promise<InstanceListResponse> {

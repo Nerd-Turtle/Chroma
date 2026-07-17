@@ -8,7 +8,8 @@ import type {
   DashboardSummary,
 } from "../../shared/types/index.js";
 import { listInstances } from "../instances/instanceService.js";
-import { getBdsRuntimeState } from "../bds/bdsRuntimeService.js";
+import { getBdsPlayerCount, getBdsRuntimeState } from "../bds/bdsRuntimeService.js";
+import { getSettings } from "../instances/instanceSettingsService.js";
 import { getAppSettings } from "../setup/setupService.js";
 
 type SystemCpuSample = {
@@ -231,6 +232,9 @@ export async function getDashboardSummary(db: Database): Promise<DashboardSummar
       const runtimeHealthStatus = runtime?.healthStatus ?? "unknown";
       const isProcessActive = runtime?.isProcessActive ?? false;
       const pid = isProcessActive ? runtime?.pid : undefined;
+      const maxPlayers = getSettings(db, instance.id)?.maxPlayers ?? 0;
+      const observedPlayerCount = getBdsPlayerCount(instance.id);
+      const playerCount = isProcessActive ? observedPlayerCount : 0;
 
       if (pid !== undefined) {
         activeInstanceIds.add(instance.id);
@@ -242,12 +246,14 @@ export async function getDashboardSummary(db: Database): Promise<DashboardSummar
       return {
         instanceId: instance.id,
         friendlyName: instance.friendlyName,
+        maxPlayers,
         status: instance.status,
         healthCategory,
         runtimeStatus,
         runtimeHealthStatus,
         isProcessActive,
         ...(pid !== undefined ? { pid } : {}),
+        ...(playerCount !== undefined ? { playerCount } : {}),
         ...resourceUsage,
       } satisfies DashboardInstancePerformance;
     }),
@@ -262,6 +268,10 @@ export async function getDashboardSummary(db: Database): Promise<DashboardSummar
   const instanceHealth = buildInstanceHealthSummary(instancePerformance);
   const runningInstanceCount = instances.filter((instance) => instance.status === "running").length;
   const stoppedInstanceCount = instances.filter((instance) => instance.status === "stopped").length;
+  const totalPlayerCount = instancePerformance.reduce((total, instance) => total + (instance.playerCount ?? 0), 0);
+  const playerCountUnavailableInstanceCount = instancePerformance.filter(
+    (instance) => instance.isProcessActive && instance.playerCount === undefined,
+  ).length;
   const ramTotalBytes = os.totalmem();
   const ramUsageBytes = ramTotalBytes - os.freemem();
   const appSettings = getAppSettings(db);
@@ -270,6 +280,8 @@ export async function getDashboardSummary(db: Database): Promise<DashboardSummar
     instanceCount: instances.length,
     runningInstanceCount,
     stoppedInstanceCount,
+    totalPlayerCount,
+    playerCountUnavailableInstanceCount,
     systemPerformance: {
       cpuUsagePercent: calculateSystemCpuUsagePercent(systemCpuSample),
       ramUsageBytes,

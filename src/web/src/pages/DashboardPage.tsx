@@ -47,6 +47,14 @@ function formatBytes(value: number | undefined): string {
   return `${nextValue.toFixed(nextValue >= 100 ? 0 : 1)} ${units[unitIndex]}`;
 }
 
+function calculateUsagePercent(value: number | undefined, total: number | undefined): number | undefined {
+  if (value === undefined || total === undefined || total <= 0) {
+    return undefined;
+  }
+
+  return (value / total) * 100;
+}
+
 function getRuntimeToneClass(instance: DashboardInstancePerformance): string {
   if (instance.healthCategory === "healthy") {
     return "status-running";
@@ -236,48 +244,97 @@ const DashboardPage = () => {
                 <strong>{summary?.instanceHealth.stoppedCount ?? 0}</strong>
                 <span>Stopped</span>
               </div>
-              <p className="dashboard-widget-note">
-                {hoveredSegment
-                  ? `${hoveredSegment.friendlyName} • ${formatLabel(hoveredSegment.healthCategory)}`
-                  : "Hover a slice to inspect an instance."}
-              </p>
+              {hoveredSegment ? (
+                <p className="dashboard-widget-note">
+                  {hoveredSegment.friendlyName} • {formatLabel(hoveredSegment.healthCategory)}
+                </p>
+              ) : null}
             </div>
           </div>
         </article>
 
-        <article className="page-panel dashboard-widget dashboard-widget-wide">
+        <article className="page-panel dashboard-widget dashboard-player-widget">
+          <div className="dashboard-widget-header">
+            <h2>Total Players</h2>
+          </div>
+
+          <div className="dashboard-total-players">
+            <strong>{summary?.totalPlayerCount ?? 0}</strong>
+            <span>{summary?.totalPlayerCount === 1 ? "Player online" : "Players online"}</span>
+            {summary?.playerCountUnavailableInstanceCount ? (
+              <small className="dashboard-player-count-warning">
+                {summary.playerCountUnavailableInstanceCount} live count unavailable
+              </small>
+            ) : null}
+          </div>
+        </article>
+
+        <article className="dashboard-widget dashboard-widget-wide dashboard-performance-section">
           <div className="dashboard-widget-header">
             <h2>Instance Performance</h2>
           </div>
 
-          <div className="dashboard-instance-list">
-            {summary?.instancePerformance.length ? (
-              summary.instancePerformance.map((instance) => (
-                <div key={instance.instanceId} className="dashboard-instance-row">
-                  <div className="dashboard-instance-main">
-                    <strong>{instance.friendlyName}</strong>
-                    <span className={`instance-bds-status ${getRuntimeToneClass(instance)}`}>{getRuntimeLabel(instance)}</span>
-                  </div>
-                  <div className="dashboard-instance-metrics">
-                    <div>
-                      <span>CPU</span>
+          {summary?.instancePerformance.length ? (
+            <div className="dashboard-instance-table" role="table" aria-label="Per-instance performance">
+              <div className="dashboard-instance-table-header" role="row">
+                <span role="columnheader">Instance</span>
+                <span role="columnheader">Status</span>
+                <span role="columnheader">CPU usage</span>
+                <span role="columnheader">Memory</span>
+                <span role="columnheader">Players</span>
+              </div>
+
+              {summary.instancePerformance.map((instance) => {
+                const memoryUsagePercent = calculateUsagePercent(
+                  instance.ramUsageBytes,
+                  summary.systemPerformance.ramTotalBytes,
+                );
+
+                return (
+                  <div key={instance.instanceId} className="dashboard-instance-row" role="row">
+                    <strong className="dashboard-instance-name" role="cell">{instance.friendlyName}</strong>
+                    <span className={`instance-bds-status ${getRuntimeToneClass(instance)}`} role="cell">
+                      <span className="dashboard-instance-status-dot" aria-hidden="true" />
+                      {getRuntimeLabel(instance)}
+                    </span>
+                    <div className="dashboard-instance-cpu" role="cell">
+                      <span className="dashboard-instance-metric-label">CPU</span>
                       <strong>{formatPercent(instance.cpuUsagePercent)}</strong>
+                      <div className="dashboard-instance-cpu-track" aria-hidden="true">
+                        <span
+                          className="dashboard-instance-cpu-fill"
+                          style={{ width: `${Math.min(100, Math.max(0, instance.cpuUsagePercent ?? 0))}%` }}
+                        />
+                      </div>
                     </div>
-                    <div>
-                      <span>RAM</span>
+                    <div className="dashboard-instance-memory" role="cell">
+                      <span className="dashboard-instance-metric-label">Memory</span>
                       <strong>{formatBytes(instance.ramUsageBytes)}</strong>
+                      {memoryUsagePercent !== undefined ? (
+                        <span className="dashboard-instance-memory-percent">{formatPercent(memoryUsagePercent)}</span>
+                      ) : null}
+                      <div className="dashboard-instance-memory-track" aria-hidden="true">
+                        <span
+                          className="dashboard-instance-memory-fill"
+                          style={{ width: `${Math.min(100, Math.max(0, memoryUsagePercent ?? 0))}%` }}
+                        />
+                      </div>
                     </div>
-                    <div>
-                      <span>PID</span>
-                      <strong>{instance.pid ?? "--"}</strong>
+                    <div className="dashboard-instance-metric" role="cell">
+                      <span className="dashboard-instance-metric-label">Players</span>
+                      <strong
+                        title={instance.playerCount === undefined ? "Live player count is unavailable for this instance." : undefined}
+                      >
+                        {instance.playerCount ?? "--"} / {instance.maxPlayers}
+                      </strong>
                     </div>
                   </div>
-                </div>
-              ))
-            ) : (
-              <p className="dashboard-widget-note">Create an instance to start seeing per-server runtime telemetry here.</p>
-            )}
-          </div>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="dashboard-widget-note">Create an instance to start seeing per-server runtime telemetry here.</p>
+          )}
         </article>
       </div>
     </section>

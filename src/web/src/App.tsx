@@ -102,7 +102,9 @@ const App = () => {
             ? "page-frame page-frame-workspace"
             : page === "addon-library"
               ? "page-frame page-frame-addon-library"
-              : "page-frame"
+              : page === "dashboard"
+                ? "page-frame page-frame-dashboard"
+                : "page-frame"
         }
       >
         {loading ? <section className="page-panel">Loading Chroma...</section> : null}

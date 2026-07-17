@@ -379,6 +379,10 @@ export function sendBdsCommand(instanceId: string, command: string): boolean {
   return processManager.sendCommand(instanceId, command);
 }
 
+export function getBdsPlayerCount(instanceId: string): number | undefined {
+  return processManager.getPlayerCount(instanceId);
+}
+
 export async function getBdsConsoleSnapshot(db: Database, instanceId: string): Promise<BdsConsoleSnapshot> {
   const instance = getInstance(db, instanceId);
 

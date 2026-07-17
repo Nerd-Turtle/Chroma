@@ -55,6 +55,43 @@ export type UpdateAppSettingsRequest = {
   clearCurseForgeApiKey?: boolean;
 };
 
+export type PkiCertificateStatus = {
+  configured: boolean;
+  tlsEnabled: boolean;
+  commonName?: string;
+  issuer?: string;
+  subjectAlternativeName?: string;
+  validFrom?: string;
+  validTo?: string;
+  fingerprintSha256?: string;
+  selfSigned?: boolean;
+};
+
+export type PkiStatusResponse = {
+  certificate: PkiCertificateStatus;
+  privateKeyAvailable: boolean;
+  certificateSigningRequestAvailable: boolean;
+};
+
+export type GeneratePkiCsrRequest = {
+  commonName: string;
+  dnsNames: string[];
+  ipAddresses: string[];
+};
+
+export type GeneratePkiCsrResponse = {
+  csrPem: string;
+  fileName: string;
+};
+
+export type InstallPkiCertificateRequest = {
+  certificatePem: string;
+};
+
+export type InstallPkiCertificateResponse = PkiStatusResponse & {
+  reloaded: boolean;
+};
+
 export type AuthSessionResponse =
   | {
       authenticated: false;
@@ -86,12 +123,14 @@ export type DashboardSystemPerformance = {
 export type DashboardInstancePerformance = {
   instanceId: string;
   friendlyName: string;
+  maxPlayers: number;
   status: InstanceStatus;
   healthCategory: DashboardInstanceHealthCategory;
   runtimeStatus: BdsRuntimeStatus;
   runtimeHealthStatus: BdsRuntimeHealthStatus;
   isProcessActive: boolean;
   pid?: number;
+  playerCount?: number;
   cpuUsagePercent?: number;
   ramUsageBytes?: number;
 };
@@ -113,6 +152,8 @@ export type DashboardSummary = {
   instanceCount: number;
   runningInstanceCount: number;
   stoppedInstanceCount: number;
+  totalPlayerCount: number;
+  playerCountUnavailableInstanceCount: number;
   systemPerformance: DashboardSystemPerformance;
   instancePerformance: DashboardInstancePerformance[];
   instanceHealth: DashboardHealthSummary;

@@ -1,9 +1,10 @@
 import type { FastifyInstance } from "fastify";
 import type { Database } from "better-sqlite3";
+import type { Server } from "node:http";
 
 import { stopAllBdsProcesses } from "../bds/bdsRuntimeService.js";
 
-export function setupShutdownHandlers(app: FastifyInstance, db: Database): void {
+export function setupShutdownHandlers(app: FastifyInstance, db: Database, redirectServer?: Server): void {
   let isShuttingDown = false;
 
   async function shutdown(signal: string): Promise<void> {
@@ -19,6 +20,17 @@ export function setupShutdownHandlers(app: FastifyInstance, db: Database): void 
       app.log.info("All BDS processes have been asked to stop");
     } catch (error) {
       app.log.error({ error }, "Failed to stop BDS processes cleanly");
+    }
+
+    try {
+      if (redirectServer) {
+        await new Promise<void>((resolve, reject) => {
+          redirectServer.close((error) => (error ? reject(error) : resolve()));
+        });
+        app.log.info("HTTP redirect server has closed");
+      }
+    } catch (error) {
+      app.log.error({ error }, "Failed to close HTTP redirect server cleanly");
     }
 
     try {

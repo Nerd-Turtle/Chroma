@@ -12,6 +12,7 @@ import {
 } from "./bdsRuntimeHandleService.js";
 import { createId } from "../utils/createId.js";
 import { appendBdsLogChunk, prepareBdsCurrentLog } from "./bdsLogService.js";
+import { BdsPlayerPresenceTracker } from "./bdsPlayerPresenceService.js";
 
 const BDS_EXECUTABLE_NAME = "bedrock_server";
 const STOP_TIMEOUT_MS = 30000;
@@ -47,6 +48,7 @@ export class BdsProcessManager {
   private runtimeStateListeners = new Set<RuntimeStateListener>();
   private currentLogSizes = new Map<string, number>();
   private logWriteChains = new Map<string, Promise<void>>();
+  private playerPresence = new BdsPlayerPresenceTracker();
 
   async start(instance: Instance): Promise<BdsRuntimeState> {
     this.instances.set(instance.id, instance);
@@ -86,6 +88,7 @@ export class BdsProcessManager {
     const now = new Date().toISOString();
     const pid = child.pid;
     this.recentLogTails.set(instance.id, []);
+    this.playerPresence.startTracking(instance.id);
     this.ensureConsoleBuffer(instance.id);
     this.currentLogSizes.set(instance.id, await prepareBdsCurrentLog(instance));
     this.logWriteChains.set(instance.id, Promise.resolve());
@@ -113,6 +116,7 @@ export class BdsProcessManager {
 
     const writeLog = async (chunk: Buffer | string): Promise<void> => {
       const line = typeof chunk === "string" ? chunk : chunk.toString("utf8");
+      this.playerPresence.appendOutput(instance.id, line);
       this.appendRecentLogTail(instance.id, line);
       this.appendConsoleOutput(instance.id, "stdout", line);
       await this.appendLogChunk(instance, line);
@@ -393,6 +397,10 @@ export class BdsProcessManager {
       desiredStatus: "stopped",
       healthStatus: "unknown",
     });
+  }
+
+  getPlayerCount(instanceId: string): number | undefined {
+    return this.playerPresence.getPlayerCount(instanceId);
   }
 
   hasRuntimeState(instanceId: string): boolean {
@@ -733,6 +741,9 @@ export class BdsProcessManager {
 
   private setRuntimeState(instanceId: string, nextState: BdsRuntimeState): void {
     const previousState = this.runtimeStates.get(instanceId);
+    if (!nextState.isProcessActive) {
+      this.playerPresence.stopTracking(instanceId);
+    }
     this.runtimeStates.set(instanceId, nextState);
     this.emitConsoleStatus(instanceId);
 

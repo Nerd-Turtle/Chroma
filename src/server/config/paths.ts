@@ -8,6 +8,14 @@ export type RuntimePaths = {
   logDir: string;
 };
 
+export type PkiPaths = {
+  directory: string;
+  privateKey: string;
+  certificate: string;
+  certificateSigningRequest: string;
+  backupsDirectory: string;
+};
+
 const isDevelopment = process.env.NODE_ENV !== "production";
 
 function resolveRuntimePaths(paths: RuntimePaths): RuntimePaths {
@@ -40,6 +48,18 @@ export function getRuntimePaths(): RuntimePaths {
 export function getDatabasePath(): string {
   const runtime = getRuntimePaths();
   return `${runtime.dataDir}/chroma.sqlite`;
+}
+
+export function getPkiPaths(): PkiPaths {
+  const directory = resolve(process.env.CHROMA_PKI_DIR ?? `${getRuntimePaths().configDir}/pki`);
+
+  return {
+    directory,
+    privateKey: resolve(process.env.CHROMA_TLS_KEY_PATH ?? `${directory}/private.key`),
+    certificate: resolve(process.env.CHROMA_TLS_CERT_PATH ?? `${directory}/certificate.pem`),
+    certificateSigningRequest: resolve(`${directory}/request.csr`),
+    backupsDirectory: resolve(`${directory}/backups`),
+  };
 }
 
 export async function ensureRuntimePaths(): Promise<void> {
