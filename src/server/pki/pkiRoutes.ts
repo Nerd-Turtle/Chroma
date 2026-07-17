@@ -16,6 +16,10 @@ function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((entry) => typeof entry === "string");
 }
 
+function isOptionalString(value: unknown): value is string | undefined {
+  return value === undefined || typeof value === "string";
+}
+
 export function registerPkiRoutes(app: FastifyInstance, db: Database, options: PkiServiceOptions = {}): void {
   app.get("/api/pki/status", { preHandler: requireAuthenticated(db) }, async (_request, reply) => {
     try {
@@ -37,12 +41,26 @@ export function registerPkiRoutes(app: FastifyInstance, db: Database, options: P
     if (!isStringArray(body.ipAddresses)) {
       return reply.code(400).send({ error: "ipAddresses must be an array of strings" });
     }
+    if (
+      !isOptionalString(body.organization) ||
+      !isOptionalString(body.organizationalUnit) ||
+      !isOptionalString(body.country) ||
+      !isOptionalString(body.stateOrProvince) ||
+      !isOptionalString(body.locality)
+    ) {
+      return reply.code(400).send({ error: "CSR subject fields must be strings" });
+    }
 
     try {
       return await generatePkiCsr({
         commonName: body.commonName,
         dnsNames: body.dnsNames,
         ipAddresses: body.ipAddresses,
+        ...(body.organization?.trim() ? { organization: body.organization.trim() } : {}),
+        ...(body.organizationalUnit?.trim() ? { organizationalUnit: body.organizationalUnit.trim() } : {}),
+        ...(body.country?.trim() ? { country: body.country.trim() } : {}),
+        ...(body.stateOrProvince?.trim() ? { stateOrProvince: body.stateOrProvince.trim() } : {}),
+        ...(body.locality?.trim() ? { locality: body.locality.trim() } : {}),
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unable to generate certificate signing request";

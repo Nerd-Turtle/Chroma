@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { X } from "lucide-react";
 import type { AppSettings, PkiStatusResponse, UpdateAppSettingsRequest } from "../../../shared/types/index.js";
 import {
   generatePkiCsr,
@@ -36,7 +37,13 @@ const SettingsPage = () => {
   const [commonName, setCommonName] = useState(() => window.location.hostname || "chroma.local");
   const [dnsNames, setDnsNames] = useState(() => window.location.hostname || "chroma.local");
   const [ipAddresses, setIpAddresses] = useState("");
+  const [organization, setOrganization] = useState("");
+  const [organizationalUnit, setOrganizationalUnit] = useState("");
+  const [country, setCountry] = useState("");
+  const [stateOrProvince, setStateOrProvince] = useState("");
+  const [locality, setLocality] = useState("");
   const [certificateFile, setCertificateFile] = useState<File | null>(null);
+  const [certificateDrawer, setCertificateDrawer] = useState<"csr" | "install" | null>(null);
 
   const timezoneOptions = useMemo(() => getTimezoneOptions(), []);
 
@@ -99,6 +106,21 @@ const SettingsPage = () => {
       window.clearTimeout(timeoutId);
     };
   }, [success, notificationDurationSeconds]);
+
+  useEffect(() => {
+    if (!certificateDrawer) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !pkiBusy) {
+        setCertificateDrawer(null);
+        setCertificateFile(null);
+        setPkiError("");
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [certificateDrawer, pkiBusy]);
 
   async function saveSettings(payload: UpdateAppSettingsRequest, message: string): Promise<void> {
     setSaving(true);
@@ -167,6 +189,11 @@ const SettingsPage = () => {
         commonName: commonName.trim(),
         dnsNames: splitNames(dnsNames),
         ipAddresses: splitNames(ipAddresses),
+        ...(organization.trim() ? { organization: organization.trim() } : {}),
+        ...(organizationalUnit.trim() ? { organizationalUnit: organizationalUnit.trim() } : {}),
+        ...(country.trim() ? { country: country.trim() } : {}),
+        ...(stateOrProvince.trim() ? { stateOrProvince: stateOrProvince.trim() } : {}),
+        ...(locality.trim() ? { locality: locality.trim() } : {}),
       });
       const url = URL.createObjectURL(new Blob([result.csrPem], { type: "application/pkcs10" }));
       const link = document.createElement("a");
@@ -174,8 +201,13 @@ const SettingsPage = () => {
       link.download = result.fileName;
       link.click();
       URL.revokeObjectURL(url);
-      setPkiStatus((current) => current ? { ...current, certificateSigningRequestAvailable: true } : current);
+      setPkiStatus((current) => current ? {
+        ...current,
+        privateKeyAvailable: true,
+        certificateSigningRequestAvailable: true,
+      } : current);
       setPkiSuccess("CSR generated. Send the downloaded file to your certificate authority.");
+      setCertificateDrawer(null);
     } catch (csrError) {
       setPkiError(csrError instanceof Error ? csrError.message : "Unable to generate CSR");
     } finally {
@@ -201,6 +233,7 @@ const SettingsPage = () => {
           ? "Certificate installed and activated. New HTTPS connections now use it."
           : "Certificate installed. It will be used the next time Chroma starts with HTTPS enabled.",
       );
+      setCertificateDrawer(null);
     } catch (certificateError) {
       setPkiError(certificateError instanceof Error ? certificateError.message : "Unable to install certificate");
     } finally {
@@ -208,10 +241,30 @@ const SettingsPage = () => {
     }
   };
 
+  const openCertificateDrawer = (drawer: "csr" | "install") => {
+    setPkiError("");
+    setPkiSuccess("");
+    setCertificateFile(null);
+    setCertificateDrawer(drawer);
+  };
+
+  const closeCertificateDrawer = () => {
+    if (pkiBusy) return;
+    setCertificateDrawer(null);
+    setCertificateFile(null);
+    setPkiError("");
+  };
+
   const formatCertificateDate = (value: string | undefined) => {
     if (!value) return "—";
     return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
   };
+
+  const certificateIdentityBroken = Boolean(
+    pkiStatus?.certificate.configured && !pkiStatus.privateKeyAvailable,
+  );
+  const canCreateCsr = Boolean(!pkiLoading && pkiStatus && !certificateIdentityBroken);
+  const canInstallCertificate = Boolean(!pkiLoading && pkiStatus?.privateKeyAvailable);
 
   return (
     <section className="settings-layout">
@@ -365,11 +418,31 @@ const SettingsPage = () => {
             <h2>HTTPS Certificate</h2>
             <p className="muted-copy">Replace the installer-created self-signed certificate without exposing its private key.</p>
           </div>
-          {pkiStatus?.certificate.configured ? (
-            <span className={`certificate-badge${pkiStatus.certificate.selfSigned ? " certificate-badge-warning" : ""}`}>
-              {pkiStatus.certificate.selfSigned ? "Self-signed" : "Custom certificate"}
-            </span>
-          ) : null}
+          <div className="certificate-header-actions">
+            {pkiStatus?.certificate.configured ? (
+              <span className={`certificate-badge${pkiStatus.certificate.selfSigned ? " certificate-badge-warning" : ""}`}>
+                {pkiStatus.certificate.selfSigned ? "Self-signed" : "Custom certificate"}
+              </span>
+            ) : null}
+            <button
+              type="button"
+              className="secondary-button"
+              disabled={!canCreateCsr}
+              title={certificateIdentityBroken ? "The existing certificate's private key is unavailable" : undefined}
+              onClick={() => openCertificateDrawer("csr")}
+            >
+              Create CSR
+            </button>
+            <button
+              type="button"
+              className="primary-button"
+              disabled={!canInstallCertificate}
+              title={!pkiLoading && !pkiStatus?.privateKeyAvailable ? "Create a CSR to initialize the TLS private key first" : undefined}
+              onClick={() => openCertificateDrawer("install")}
+            >
+              Install certificate
+            </button>
+          </div>
         </header>
 
         {pkiLoading ? <p className="muted-copy">Loading certificate status...</p> : null}
@@ -385,72 +458,132 @@ const SettingsPage = () => {
               <div><dt>SHA-256 fingerprint</dt><dd className="certificate-fingerprint">{pkiStatus.certificate.fingerprintSha256 ?? "—"}</dd></div>
             </dl>
 
-            {!pkiStatus.privateKeyAvailable ? (
+            {certificateIdentityBroken ? (
               <div className="form-error">The TLS private key is missing. Repair the installation before managing certificates.</div>
-            ) : (
-              <div className="certificate-workflow">
-                <form className="form-grid certificate-workflow-step" onSubmit={handleGenerateCsr}>
-                  <div className="certificate-step-heading">
-                    <span>1</span>
-                    <div>
-                      <h3>Generate a CSR</h3>
-                      <p className="muted-copy">Add every hostname or IP address people will use to open Chroma.</p>
-                    </div>
-                  </div>
+            ) : !pkiStatus.privateKeyAvailable ? (
+              <div className="status-banner status-banner-info">No TLS identity has been initialized. Creating a CSR will securely create the managed private key.</div>
+            ) : null}
+          </>
+        ) : null}
+      </section>
+
+      {certificateDrawer ? (
+        <div className="settings-drawer-layer">
+          <button
+            type="button"
+            className="settings-drawer-backdrop"
+            aria-label="Close certificate drawer"
+            onClick={closeCertificateDrawer}
+          />
+          <aside
+            className="settings-drawer"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="certificate-drawer-title"
+          >
+            <header className="settings-drawer-header">
+              <div>
+                <p className="eyebrow">HTTPS Certificate</p>
+                <h2 id="certificate-drawer-title">
+                  {certificateDrawer === "csr" ? "Create certificate signing request" : "Install signed certificate"}
+                </h2>
+              </div>
+              <button
+                type="button"
+                className="settings-drawer-close"
+                aria-label="Close certificate drawer"
+                disabled={pkiBusy}
+                onClick={closeCertificateDrawer}
+              >
+                <X aria-hidden="true" />
+              </button>
+            </header>
+
+            {certificateDrawer === "csr" ? (
+              <form className="form-grid settings-drawer-form" onSubmit={handleGenerateCsr}>
+                <div className="settings-drawer-fields">
+                  <p className="muted-copy">
+                    {pkiStatus?.privateKeyAvailable
+                      ? "The installer-managed private key stays on this server. Add every name people use to reach Chroma."
+                      : "Chroma will create a managed private key that stays on this server. Add every name people use to reach Chroma."}
+                  </p>
+                  {pkiError ? <div className="form-error">{pkiError}</div> : null}
 
                   <label>
                     Common name
-                    <input value={commonName} onChange={(event) => setCommonName(event.target.value)} required />
+                    <input autoFocus value={commonName} onChange={(event) => setCommonName(event.target.value)} required />
                   </label>
                   <label>
-                    DNS names
-                    <textarea value={dnsNames} onChange={(event) => setDnsNames(event.target.value)} rows={3} placeholder="chroma.example.com" />
-                    <small className="muted-copy">One per line or separated by commas.</small>
+                    SAN DNS names
+                    <textarea value={dnsNames} onChange={(event) => setDnsNames(event.target.value)} rows={4} placeholder="chroma.example.com" />
+                    <small className="muted-copy">One hostname per line or separated by commas. Wildcards are supported in the first label.</small>
                   </label>
                   <label>
-                    IP addresses
-                    <textarea value={ipAddresses} onChange={(event) => setIpAddresses(event.target.value)} rows={2} placeholder="192.0.2.10" />
-                    <small className="muted-copy">Optional; one per line or separated by commas.</small>
+                    SAN IP addresses
+                    <textarea value={ipAddresses} onChange={(event) => setIpAddresses(event.target.value)} rows={3} placeholder="192.0.2.10" />
+                    <small className="muted-copy">Optional; IPv4 and IPv6 are supported.</small>
                   </label>
-                  <button type="submit" className="secondary-button settings-inline-action" disabled={pkiBusy}>
-                    {pkiBusy ? "Working..." : "Generate and download CSR"}
-                  </button>
-                </form>
 
-                <div className="form-grid certificate-workflow-step">
-                  <div className="certificate-step-heading">
-                    <span>2</span>
-                    <div>
-                      <h3>Upload the signed certificate</h3>
-                      <p className="muted-copy">Upload the PEM returned by your certificate authority, with the server certificate first followed by any intermediate certificates.</p>
+                  <fieldset className="certificate-subject-fields">
+                    <legend>Optional subject information</legend>
+                    <label>Organization<input value={organization} onChange={(event) => setOrganization(event.target.value)} maxLength={128} /></label>
+                    <label>Organizational unit<input value={organizationalUnit} onChange={(event) => setOrganizationalUnit(event.target.value)} maxLength={128} /></label>
+                    <div className="certificate-subject-row">
+                      <label>Country<input value={country} onChange={(event) => setCountry(event.target.value.toUpperCase())} maxLength={2} placeholder="US" /></label>
+                      <label>State or province<input value={stateOrProvince} onChange={(event) => setStateOrProvince(event.target.value)} maxLength={128} /></label>
                     </div>
-                  </div>
+                    <label>City or locality<input value={locality} onChange={(event) => setLocality(event.target.value)} maxLength={128} /></label>
+                  </fieldset>
 
+                  <div className="certificate-fixed-options" aria-label="Certificate request defaults">
+                    <div><span>Private key</span><strong>{pkiStatus?.privateKeyAvailable ? "Existing managed key" : "New managed RSA 3072-bit key"}</strong></div>
+                    <div><span>Signature</span><strong>SHA-256</strong></div>
+                    <div><span>Usage</span><strong>TLS server authentication</strong></div>
+                  </div>
+                </div>
+
+                <footer className="settings-drawer-footer">
+                  <button type="submit" className="primary-button" disabled={pkiBusy}>
+                    {pkiBusy ? "Generating..." : "Generate and download CSR"}
+                  </button>
+                  <button type="button" className="secondary-button" disabled={pkiBusy} onClick={closeCertificateDrawer}>Cancel</button>
+                </footer>
+              </form>
+            ) : (
+              <div className="form-grid settings-drawer-form">
+                <div className="settings-drawer-fields">
+                  <p className="muted-copy">Upload the PEM returned by your certificate authority. Place the server certificate first, followed by any intermediate certificates.</p>
+                  {pkiError ? <div className="form-error">{pkiError}</div> : null}
                   <label>
                     Signed certificate chain
                     <input
+                      autoFocus
                       type="file"
                       accept=".pem,.crt,.cer,application/x-pem-file,application/pkix-cert"
                       onChange={(event) => setCertificateFile(event.target.files?.[0] ?? null)}
                     />
                   </label>
+                  <p className="muted-copy certificate-safety-copy">
+                    Chroma validates the certificate against its private key and backs up the current certificate before activation.
+                  </p>
+                </div>
+
+                <footer className="settings-drawer-footer">
                   <button
                     type="button"
-                    className="primary-button settings-inline-action"
+                    className="primary-button"
                     disabled={pkiBusy || !certificateFile}
                     onClick={() => void handleInstallCertificate()}
                   >
-                    {pkiBusy ? "Working..." : "Validate and install certificate"}
+                    {pkiBusy ? "Installing..." : "Validate and install"}
                   </button>
-                  <p className="muted-copy certificate-safety-copy">
-                    Chroma verifies the certificate against its private key and keeps a backup of the current certificate before activation.
-                  </p>
-                </div>
+                  <button type="button" className="secondary-button" disabled={pkiBusy} onClick={closeCertificateDrawer}>Cancel</button>
+                </footer>
               </div>
             )}
-          </>
-        ) : null}
-      </section>
+          </aside>
+        </div>
+      ) : null}
     </section>
   );
 };

@@ -77,6 +77,11 @@ export type GeneratePkiCsrRequest = {
   commonName: string;
   dnsNames: string[];
   ipAddresses: string[];
+  organization?: string;
+  organizationalUnit?: string;
+  country?: string;
+  stateOrProvince?: string;
+  locality?: string;
 };
 
 export type GeneratePkiCsrResponse = {

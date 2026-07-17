@@ -18,6 +18,7 @@ const execFileAsync = promisify(execFile);
 const MAX_CERTIFICATE_PEM_BYTES = 128 * 1024;
 const DNS_LABEL_PATTERN = /^(?:\*|[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)$/i;
 const CERTIFICATE_PATTERN = /-----BEGIN CERTIFICATE-----[\s\S]+?-----END CERTIFICATE-----/g;
+const SUBJECT_VALUE_PATTERN = /^[a-z0-9 .,'()&@_-]+$/i;
 
 export type TlsCertificateMaterial = {
   key: Buffer;
@@ -78,7 +79,33 @@ function normalizeCsrRequest(input: GeneratePkiCsrRequest): GeneratePkiCsrReques
     throw new Error("A CSR may contain at most 50 subject alternative names");
   }
 
-  return { commonName, dnsNames, ipAddresses };
+  const subjectFields = {
+    organization: input.organization?.trim(),
+    organizationalUnit: input.organizationalUnit?.trim(),
+    country: input.country?.trim().toUpperCase(),
+    stateOrProvince: input.stateOrProvince?.trim(),
+    locality: input.locality?.trim(),
+  };
+  for (const [field, value] of Object.entries(subjectFields)) {
+    if (!value) continue;
+    if (value.length > 128 || !SUBJECT_VALUE_PATTERN.test(value)) {
+      throw new Error(`${field} contains unsupported characters or is too long`);
+    }
+  }
+  if (subjectFields.country && !/^[A-Z]{2}$/.test(subjectFields.country)) {
+    throw new Error("country must be a two-letter country code");
+  }
+
+  return {
+    commonName,
+    dnsNames,
+    ipAddresses,
+    ...(subjectFields.organization ? { organization: subjectFields.organization } : {}),
+    ...(subjectFields.organizationalUnit ? { organizationalUnit: subjectFields.organizationalUnit } : {}),
+    ...(subjectFields.country ? { country: subjectFields.country } : {}),
+    ...(subjectFields.stateOrProvince ? { stateOrProvince: subjectFields.stateOrProvince } : {}),
+    ...(subjectFields.locality ? { locality: subjectFields.locality } : {}),
+  };
 }
 
 function getCommonName(subject: string): string | undefined {
@@ -151,7 +178,26 @@ export async function generatePkiCsr(input: GeneratePkiCsrRequest): Promise<Gene
   const request = normalizeCsrRequest(input);
 
   if (!(await fileExists(paths.privateKey))) {
-    throw new Error("The TLS private key is missing. Repair the Chroma installation before generating a CSR.");
+    if (await fileExists(paths.certificate)) {
+      throw new Error("The TLS private key is missing but a certificate exists. Repair the Chroma installation before generating a CSR.");
+    }
+
+    await mkdir(paths.directory, { recursive: true, mode: 0o750 });
+    const temporaryKeyPath = `${paths.privateKey}.${randomUUID()}.tmp`;
+    try {
+      await execFileAsync(
+        "openssl",
+        ["genpkey", "-algorithm", "RSA", "-pkeyopt", "rsa_keygen_bits:3072", "-out", temporaryKeyPath],
+        { maxBuffer: 1024 * 1024 },
+      );
+      await chmod(temporaryKeyPath, 0o600);
+      await rename(temporaryKeyPath, paths.privateKey);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "OpenSSL failed to generate the private key";
+      throw new Error(`Unable to initialize the TLS private key: ${message}`);
+    } finally {
+      await unlink(temporaryKeyPath).catch(() => undefined);
+    }
   }
 
   await mkdir(paths.directory, { recursive: true, mode: 0o750 });
@@ -160,6 +206,14 @@ export async function generatePkiCsr(input: GeneratePkiCsrRequest): Promise<Gene
     ...request.dnsNames.map((value) => `DNS:${value}`),
     ...request.ipAddresses.map((value) => `IP:${value}`),
   ].join(",");
+  const subject = [
+    `/CN=${request.commonName}`,
+    request.organization ? `/O=${request.organization}` : "",
+    request.organizationalUnit ? `/OU=${request.organizationalUnit}` : "",
+    request.country ? `/C=${request.country}` : "",
+    request.stateOrProvince ? `/ST=${request.stateOrProvince}` : "",
+    request.locality ? `/L=${request.locality}` : "",
+  ].join("");
 
   try {
     await execFileAsync(
@@ -173,9 +227,13 @@ export async function generatePkiCsr(input: GeneratePkiCsrRequest): Promise<Gene
         "-out",
         temporaryPath,
         "-subj",
-        `/CN=${request.commonName}`,
+        subject,
         "-addext",
         `subjectAltName=${subjectAlternativeNames}`,
+        "-addext",
+        "extendedKeyUsage=serverAuth",
+        "-addext",
+        "keyUsage=digitalSignature,keyEncipherment",
       ],
       { maxBuffer: 1024 * 1024 },
     );
