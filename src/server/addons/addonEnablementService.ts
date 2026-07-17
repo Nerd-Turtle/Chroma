@@ -1,4 +1,4 @@
-import { copyFile, mkdir, opendir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, opendir, rm, stat } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import type { Database } from "better-sqlite3";
 import type { Instance, InstanceAddon, InstanceAddonPack } from "../../shared/types/index.js";
@@ -10,11 +10,14 @@ import { getRuntimePaths } from "../config/paths.js";
 import { getAddonDetailForInstance, listAddonsForInstance } from "./addonService.js";
 import { listInstanceAddonPacks, updateInstanceAddonEnablement, updateInstanceAddonSortOrders } from "./addonRepository.js";
 import { getAddonDownloadBasePath } from "./addonStoragePaths.js";
-
-type WorldPackReference = {
-  pack_id: string;
-  version: number[];
-};
+import {
+  addWorldPackReference,
+  applyManagedPackOrder,
+  ensureActiveWorldPath,
+  readWorldPackReferences,
+  removeWorldPackReference,
+  writeWorldPackReferences,
+} from "./addonWorldService.js";
 
 const legacyDevelopmentDataPrefix = ".runtime/var/lib/chroma/";
 
@@ -80,99 +83,6 @@ async function copyDirectoryRecursive(sourceDir: string, destinationDir: string)
   }
 }
 
-async function getActiveWorldPath(instance: Instance): Promise<string> {
-  const worldsPath = join(instance.instancePath, "bds", "worlds");
-
-  if (instance.activeWorldName) {
-    const worldPath = join(worldsPath, instance.activeWorldName);
-    assertChildPath(worldsPath, worldPath);
-    return worldPath;
-  }
-
-  const worldDirectories: string[] = [];
-  const directory = await opendir(worldsPath);
-  for await (const entry of directory) {
-    if (entry.isDirectory()) {
-      worldDirectories.push(entry.name);
-    }
-  }
-
-  if (worldDirectories.length === 1) {
-    const [worldDirectory] = worldDirectories;
-    if (worldDirectory) {
-      return join(worldsPath, worldDirectory);
-    }
-  }
-
-  if (worldDirectories.includes("Bedrock level")) {
-    return join(worldsPath, "Bedrock level");
-  }
-
-  if (worldDirectories.length === 0) {
-    throw new Error("Start the instance once to generate a world before enabling addons.");
-  }
-
-  throw new Error("Select an active world before enabling addons.");
-}
-
-async function readWorldPackReferences(path: string): Promise<WorldPackReference[]> {
-  if (!(await pathExists(path))) {
-    return [];
-  }
-
-  const parsed = JSON.parse(await readFile(path, "utf8")) as unknown;
-  if (!Array.isArray(parsed)) {
-    throw new Error(`World pack file is not an array: ${path}`);
-  }
-
-  return parsed.filter((entry): entry is WorldPackReference => {
-    if (!entry || typeof entry !== "object") return false;
-    const maybeReference = entry as Partial<WorldPackReference>;
-    return typeof maybeReference.pack_id === "string" && Array.isArray(maybeReference.version);
-  });
-}
-
-async function writeWorldPackReferences(path: string, references: WorldPackReference[]): Promise<void> {
-  await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, `${JSON.stringify(references, null, 2)}\n`, "utf8");
-}
-
-function addWorldPackReference(references: WorldPackReference[], pack: InstanceAddonPack): WorldPackReference[] {
-  const exists = references.some(
-    (reference) => reference.pack_id === pack.headerUuid && JSON.stringify(reference.version) === JSON.stringify(pack.headerVersion),
-  );
-
-  if (exists) {
-    return references;
-  }
-
-  return [...references, { pack_id: pack.headerUuid, version: pack.headerVersion }];
-}
-
-function removeWorldPackReference(references: WorldPackReference[], pack: InstanceAddonPack): WorldPackReference[] {
-  return references.filter(
-    (reference) => !(reference.pack_id === pack.headerUuid && JSON.stringify(reference.version) === JSON.stringify(pack.headerVersion)),
-  );
-}
-
-function sameWorldPackReference(reference: WorldPackReference, pack: InstanceAddonPack): boolean {
-  return reference.pack_id === pack.headerUuid && JSON.stringify(reference.version) === JSON.stringify(pack.headerVersion);
-}
-
-function applyManagedPackOrder(references: WorldPackReference[], orderedPacks: InstanceAddonPack[]): WorldPackReference[] {
-  const unmanagedReferences = references.filter(
-    (reference) => !orderedPacks.some((pack) => sameWorldPackReference(reference, pack)),
-  );
-
-  return [
-    ...orderedPacks.map((pack) => ({
-      pack_id: pack.headerUuid,
-      version: pack.headerVersion,
-    })),
-    ...unmanagedReferences,
-  ];
-}
-
 function getImportedPackPath(instance: Instance, pack: InstanceAddonPack): string {
   const version = pack.headerVersion.join("_");
   const folderName = `chroma_${pack.headerUuid}_${version}`;
@@ -216,7 +126,7 @@ async function syncEnabledAddonPackOrder(db: Database, instance: Instance): Prom
     }
   }
 
-  const worldPath = await getActiveWorldPath(instance);
+  const worldPath = await ensureActiveWorldPath(instance);
   const behaviorJsonPath = join(worldPath, "world_behavior_packs.json");
   const resourceJsonPath = join(worldPath, "world_resource_packs.json");
   const behaviorReferences = await readWorldPackReferences(behaviorJsonPath);
@@ -302,7 +212,7 @@ export async function enableAddonForInstance(db: Database, instanceId: string, a
     throw new Error("Addon has no supported packs to enable.");
   }
 
-  const worldPath = await getActiveWorldPath(instance);
+  const worldPath = await ensureActiveWorldPath(instance);
   const worldStats = await stat(worldPath);
   if (!worldStats.isDirectory()) {
     throw new Error("Active world path is not a directory.");
@@ -373,7 +283,7 @@ export async function disableAddonForInstance(db: Database, instanceId: string, 
     throw new Error("Addon has no enabled packs.");
   }
 
-  const worldPath = await getActiveWorldPath(instance);
+  const worldPath = await ensureActiveWorldPath(instance);
   await createInternalRevertBackup(db, instanceId);
 
   const behaviorJsonPath = join(worldPath, "world_behavior_packs.json");

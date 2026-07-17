@@ -238,6 +238,7 @@ export type InstanceBdsManualUpdateResponse = {
 
 export type InstanceBdsRuntimeResponse = {
   runtime: BdsRuntimeState;
+  validation?: BdsStartValidationResult;
 };
 
 export type InstanceBdsConsoleCommandRequest = {

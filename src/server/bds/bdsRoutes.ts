@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import type { Database } from "better-sqlite3";
+import type { BdsStartValidationResult } from "../../shared/types/index.js";
 import {
   discoverBdsDownloadUrl,
 } from "./bdsDiscoveryService.js";
@@ -189,8 +190,15 @@ export async function registerBdsRoutes(app: FastifyInstance, db: Database) {
     };
 
     try {
-      const runtime = await startBdsForInstance(db, params.instanceId);
-      return { runtime };
+      let validation: BdsStartValidationResult | undefined;
+      const runtime = await startBdsForInstance(db, params.instanceId, {
+        onValidationResult: (result) => {
+          if (result.warnings.length > 0) {
+            validation = result;
+          }
+        },
+      });
+      return validation ? { runtime, validation } : { runtime };
     } catch (error) {
       if (error instanceof BdsStartValidationError) {
         return reply.code(409).send({

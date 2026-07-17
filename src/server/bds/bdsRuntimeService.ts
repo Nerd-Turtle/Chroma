@@ -3,17 +3,30 @@ import type { FastifyBaseLogger } from "fastify";
 import type { BdsConsoleSnapshot } from "../../shared/types/index.js";
 import type { BdsRuntimeState } from "../../shared/types/bdsRuntime.js";
 import type { Instance } from "../../shared/types/index.js";
+import type { BdsStartValidationIssue, BdsStartValidationResult } from "../../shared/types/index.js";
+import { applyEnabledAddonsForInstance } from "../addons/addonApplicationService.js";
 import { getInstance, listInstances } from "../instances/instanceService.js";
 import { getBdsInstall } from "./bdsRepository.js";
 import { updateInstanceStatus } from "../instances/instanceRepository.js";
 import { BdsProcessManager } from "./bdsProcessManager.js";
-import { assertInstanceCanStart } from "./bdsStartValidationService.js";
+import { BdsStartValidationError, validateInstanceCanStart } from "./bdsStartValidationService.js";
 import { appendInstanceRuntimeEvent } from "../instances/instanceRuntimeEventService.js";
 import type { BdsLogFileSummary, BdsLogPage, BdsLogTail } from "./bdsLogService.js";
 import { getInstanceBdsLogPage, getInstanceCurrentBdsLogTail, listBdsLogFiles } from "./bdsLogService.js";
 
 const processManager = new BdsProcessManager();
 let runtimeStateSynchronizationInitialized = false;
+
+type StartBdsForInstanceOptions = {
+  onValidationResult?: (result: BdsStartValidationResult) => void;
+};
+
+const repairableAddonStartIssueCodes = new Set([
+  "enabled_addon_world_missing",
+  "enabled_addon_pack_missing_path",
+  "enabled_addon_pack_missing",
+  "enabled_addon_pack_unreferenced",
+]);
 
 export class BdsStartupVerificationError extends Error {
   readonly runtime: BdsRuntimeState;
@@ -47,6 +60,75 @@ function mapRuntimeStateToInstanceStatus(runtimeState: BdsRuntimeState): Instanc
   }
 
   return runtimeState.status as Instance["status"];
+}
+
+function hasRepairableAddonStartIssues(result: BdsStartValidationResult): boolean {
+  return result.errors.some((issue) => repairableAddonStartIssueCodes.has(issue.code));
+}
+
+function buildAddonRepairWarning(repairedAddonCount: number, repairedPackCount: number, reasons: string[]): BdsStartValidationIssue {
+  const reasonText = reasons.length > 0 ? ` ${reasons.join("; ")}.` : "";
+  return {
+    code: "enabled_addons_repaired",
+    level: "warning",
+    field: "addons",
+    message:
+      `Chroma repaired enabled addon files for ${repairedAddonCount} addon${repairedAddonCount === 1 ? "" : "s"} ` +
+      `and ${repairedPackCount} pack${repairedPackCount === 1 ? "" : "s"} before starting the server.${reasonText}`,
+  };
+}
+
+async function validateAndRepairInstanceForStart(db: Database, instance: Instance): Promise<BdsStartValidationResult> {
+  const initialResult = await validateInstanceCanStart(db, instance);
+
+  if (!hasRepairableAddonStartIssues(initialResult)) {
+    return initialResult;
+  }
+
+  try {
+    const repairResult = await applyEnabledAddonsForInstance(db, instance, { createBackup: true });
+    const repairedResult = await validateInstanceCanStart(db, instance);
+
+    if (!repairResult.repaired) {
+      return repairedResult;
+    }
+
+    const repairWarning = buildAddonRepairWarning(repairResult.addonCount, repairResult.packCount, repairResult.reasons);
+
+    await appendInstanceRuntimeEvent(db, instance.id, {
+      category: "runtime",
+      action: "start_addons_repaired",
+      level: "warning",
+      message: repairWarning.message,
+      details: {
+        addonCount: repairResult.addonCount,
+        packCount: repairResult.packCount,
+        reasons: repairResult.reasons,
+      },
+    });
+
+    return {
+      canStart: repairedResult.canStart,
+      errors: repairedResult.errors,
+      warnings: [repairWarning, ...repairedResult.warnings],
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+
+    return {
+      canStart: false,
+      errors: [
+        ...initialResult.errors.filter((issue) => !repairableAddonStartIssueCodes.has(issue.code)),
+        {
+          code: "enabled_addon_repair_failed",
+          level: "error",
+          field: "addons",
+          message: `Chroma could not repair enabled addons before start: ${message}`,
+        },
+      ],
+      warnings: initialResult.warnings,
+    };
+  }
 }
 
 function ensureBdsInstalled(db: Database, instanceId: string): void {
@@ -139,7 +221,11 @@ export async function setBdsMaintenanceState(
   return runtimeState;
 }
 
-export async function startBdsForInstance(db: Database, instanceId: string): Promise<BdsRuntimeState> {
+export async function startBdsForInstance(
+  db: Database,
+  instanceId: string,
+  options: StartBdsForInstanceOptions = {},
+): Promise<BdsRuntimeState> {
   const instance = getInstance(db, instanceId);
 
   if (!instance) {
@@ -155,7 +241,11 @@ export async function startBdsForInstance(db: Database, instanceId: string): Pro
   });
 
   try {
-    await assertInstanceCanStart(db, instance);
+    const validationResult = await validateAndRepairInstanceForStart(db, instance);
+    options.onValidationResult?.(validationResult);
+    if (!validationResult.canStart) {
+      throw new BdsStartValidationError(validationResult);
+    }
   } catch (error) {
     if (error instanceof Error) {
       await appendInstanceRuntimeEvent(db, instanceId, {

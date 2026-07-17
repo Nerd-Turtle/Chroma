@@ -457,6 +457,7 @@ const InstancesPage = () => {
   const consoleOutputRef = useRef<HTMLDivElement | null>(null);
   const consoleInputRef = useRef<HTMLInputElement | null>(null);
   const deleteDialogCancelRef = useRef<HTMLButtonElement | null>(null);
+  const selectedInstanceIdRef = useRef("");
   const [instances, setInstances] = useState<Instance[]>([]);
   const [instanceBdsStatuses, setInstanceBdsStatuses] = useState<Record<string, BdsInstall>>({});
   const [selectedInstanceId, setSelectedInstanceId] = useState<string>("");
@@ -555,10 +556,16 @@ const InstancesPage = () => {
     (notice) => !dismissedWorkspaceNoticeIds.includes(notice.id),
   );
 
-  async function loadInstances(preferredInstanceId?: string) {
+  useEffect(() => {
+    selectedInstanceIdRef.current = selectedInstanceId;
+  }, [selectedInstanceId]);
+
+  async function loadInstances(preferredInstanceId?: string, options: { clearStartValidation?: boolean } = {}) {
     setListLoading(true);
     setError("");
-    setStartValidationFeedback(null);
+    if (options.clearStartValidation !== false) {
+      setStartValidationFeedback(null);
+    }
 
     try {
       const result = await getInstances();
@@ -611,19 +618,26 @@ const InstancesPage = () => {
       return;
     }
 
+    const instanceId = selectedInstanceId;
+    let ignore = false;
+
     async function loadWorkspaceData() {
       setDetailsLoading(true);
       setError("");
 
       try {
         const [instanceResult, settingsResult, bdsResult, runtimeResult, eventsResult, addonsResult] = await Promise.all([
-          getInstance(selectedInstanceId),
-          getInstanceSettings(selectedInstanceId),
-          getInstanceBdsStatus(selectedInstanceId),
-          getInstanceBdsRuntime(selectedInstanceId),
-          getInstanceRuntimeEvents(selectedInstanceId),
-          getInstanceAddons(selectedInstanceId),
+          getInstance(instanceId),
+          getInstanceSettings(instanceId),
+          getInstanceBdsStatus(instanceId),
+          getInstanceBdsRuntime(instanceId),
+          getInstanceRuntimeEvents(instanceId),
+          getInstanceAddons(instanceId),
         ]);
+
+        if (ignore || selectedInstanceIdRef.current !== instanceId) {
+          return;
+        }
 
         setWorkspaceData({
           instance: instanceResult.instance,
@@ -641,14 +655,24 @@ const InstancesPage = () => {
           updateCheckWeekday: instanceResult.instance.updateCheckWeekday,
         });
       } catch (loadError) {
+        if (ignore || selectedInstanceIdRef.current !== instanceId) {
+          return;
+        }
+
         setWorkspaceData(null);
         setError(loadError instanceof Error ? loadError.message : "Unable to load instance details");
       } finally {
-        setDetailsLoading(false);
+        if (!ignore && selectedInstanceIdRef.current === instanceId) {
+          setDetailsLoading(false);
+        }
       }
     }
 
     void loadWorkspaceData();
+
+    return () => {
+      ignore = true;
+    };
   }, [rightPaneMode, selectedInstanceId]);
 
   useEffect(() => {
@@ -833,6 +857,11 @@ const InstancesPage = () => {
     setAddonLinkEditorOpen(false);
     setAddonLinkLibrary([]);
     setSelectedAddonFileIds([]);
+    setServerPropertiesEditorOpen(false);
+    setServerPropertiesLoading(false);
+    setServerPropertiesSaving(false);
+    setServerPropertiesData(null);
+    setServerPropertiesError("");
   }, [rightPaneMode, selectedInstanceId]);
 
   useEffect(() => {
@@ -874,9 +903,10 @@ const InstancesPage = () => {
       return;
     }
 
+    const targetInstanceId = selectedInstanceId;
     const timer = window.setInterval(() => {
-      void loadInstances(selectedInstanceId);
-      void refreshSelectedInstance(selectedInstanceId);
+      void loadInstances(undefined);
+      void refreshSelectedInstance(targetInstanceId);
     }, 1000);
 
     return () => {
@@ -893,6 +923,10 @@ const InstancesPage = () => {
       getInstanceRuntimeEvents(instanceId),
       getInstanceAddons(instanceId),
     ]);
+
+    if (selectedInstanceIdRef.current !== instanceId) {
+      return;
+    }
 
     setWorkspaceData({
       instance: instanceResult.instance,
@@ -1224,17 +1258,23 @@ const InstancesPage = () => {
       return;
     }
 
+    const targetInstanceId = selectedInstanceId;
+    const nextInstanceEditor = { ...instanceEditor };
     setSavingInstance(true);
     setError("");
     setBanner(null);
 
     try {
-      await updateInstance(selectedInstanceId, instanceEditor);
-      await loadInstances(selectedInstanceId);
-      await refreshSelectedInstance(selectedInstanceId);
-      setEditingInstance(false);
+      await updateInstance(targetInstanceId, nextInstanceEditor);
+      await loadInstances(undefined);
+      if (selectedInstanceIdRef.current === targetInstanceId) {
+        await refreshSelectedInstance(targetInstanceId);
+        setEditingInstance(false);
+      }
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : "Unable to save instance");
+      if (selectedInstanceIdRef.current === targetInstanceId) {
+        setError(saveError instanceof Error ? saveError.message : "Unable to save instance");
+      }
     } finally {
       setSavingInstance(false);
     }
@@ -1326,6 +1366,7 @@ const InstancesPage = () => {
       return;
     }
 
+    const targetInstanceId = selectedInstanceId;
     setActionInFlight(action);
     setError("");
     setBanner(null);
@@ -1335,20 +1376,32 @@ const InstancesPage = () => {
 
     try {
       if (action === "start") {
-        await startInstanceBds(selectedInstanceId);
+        const response = await startInstanceBds(targetInstanceId);
+        if (selectedInstanceIdRef.current === targetInstanceId) {
+          setStartValidationFeedback(response.validation ?? null);
+        }
       } else if (action === "stop") {
-        await stopInstanceBds(selectedInstanceId);
+        await stopInstanceBds(targetInstanceId);
       } else {
-        await restartInstanceBds(selectedInstanceId);
+        await restartInstanceBds(targetInstanceId);
       }
 
-      await loadInstances(selectedInstanceId);
-      await refreshSelectedInstance(selectedInstanceId);
+      await loadInstances(undefined, { clearStartValidation: false });
+      if (selectedInstanceIdRef.current === targetInstanceId) {
+        await refreshSelectedInstance(targetInstanceId);
+      }
     } catch (actionError) {
-      if (action === "start" && actionError instanceof ApiRequestError && actionError.validation) {
+      if (
+        action === "start" &&
+        selectedInstanceIdRef.current === targetInstanceId &&
+        actionError instanceof ApiRequestError &&
+        actionError.validation
+      ) {
         setStartValidationFeedback(actionError.validation);
       }
-      setError(actionError instanceof Error ? actionError.message : `Unable to ${action} instance`);
+      if (selectedInstanceIdRef.current === targetInstanceId) {
+        setError(actionError instanceof Error ? actionError.message : `Unable to ${action} instance`);
+      }
     } finally {
       setActionInFlight("");
     }
@@ -1379,16 +1432,21 @@ const InstancesPage = () => {
       return;
     }
 
+    const targetInstanceId = selectedInstanceId;
     setActionInFlight("check-update");
     setError("");
     setBanner(null);
     setUpdateMenuOpen(false);
 
     try {
-      const result = await checkInstanceBdsUpdates(selectedInstanceId);
+      const result = await checkInstanceBdsUpdates(targetInstanceId);
       setLatestBdsVersion(result.latestVersion ?? "");
-      await loadInstances(selectedInstanceId);
-      await refreshSelectedInstance(selectedInstanceId);
+      await loadInstances(undefined);
+      if (selectedInstanceIdRef.current !== targetInstanceId) {
+        return;
+      }
+
+      await refreshSelectedInstance(targetInstanceId);
 
       if (!result.latestVersion) {
         setBanner({ message: "Unable to determine the latest BDS version right now.", tone: "warning" });
@@ -1405,7 +1463,9 @@ const InstancesPage = () => {
         tone: "warning",
       });
     } catch (checkError) {
-      setError(checkError instanceof Error ? checkError.message : "Unable to check for updates");
+      if (selectedInstanceIdRef.current === targetInstanceId) {
+        setError(checkError instanceof Error ? checkError.message : "Unable to check for updates");
+      }
     } finally {
       setActionInFlight("");
     }
@@ -1416,6 +1476,7 @@ const InstancesPage = () => {
       return;
     }
 
+    const targetInstanceId = selectedInstanceId;
     setActionInFlight("update");
     setError("");
     setBanner(null);
@@ -1430,9 +1491,13 @@ const InstancesPage = () => {
         return;
       }
 
-      await manualUpdateInstanceBds(selectedInstanceId);
-      await loadInstances(selectedInstanceId);
-      await refreshSelectedInstance(selectedInstanceId);
+      await manualUpdateInstanceBds(targetInstanceId);
+      await loadInstances(undefined);
+      if (selectedInstanceIdRef.current !== targetInstanceId) {
+        return;
+      }
+
+      await refreshSelectedInstance(targetInstanceId);
       if (activeTab === "properties") {
         await openServerPropertiesEditor(true);
       }
@@ -1443,7 +1508,9 @@ const InstancesPage = () => {
         tone: "info",
       });
     } catch (updateError) {
-      setError(updateError instanceof Error ? updateError.message : "Unable to update BDS");
+      if (selectedInstanceIdRef.current === targetInstanceId) {
+        setError(updateError instanceof Error ? updateError.message : "Unable to update BDS");
+      }
     } finally {
       setActionInFlight("");
     }
@@ -1454,6 +1521,7 @@ const InstancesPage = () => {
       return;
     }
 
+    const targetInstanceId = selectedInstanceId;
     setServerPropertiesLoading(true);
     setServerPropertiesError("");
     if (!backgroundOnly) {
@@ -1461,16 +1529,26 @@ const InstancesPage = () => {
     }
 
     try {
-      const result = await getInstanceServerProperties(selectedInstanceId);
+      const result = await getInstanceServerProperties(targetInstanceId);
+      if (selectedInstanceIdRef.current !== targetInstanceId) {
+        return;
+      }
+
       setServerPropertiesData({
         content: result.content,
         filePath: result.filePath,
         restartRequired: result.restartRequired,
       });
     } catch (loadError) {
+      if (selectedInstanceIdRef.current !== targetInstanceId) {
+        return;
+      }
+
       setServerPropertiesError(loadError instanceof Error ? loadError.message : "Unable to load server.properties");
     } finally {
-      setServerPropertiesLoading(false);
+      if (selectedInstanceIdRef.current === targetInstanceId) {
+        setServerPropertiesLoading(false);
+      }
     }
   };
 
@@ -1503,30 +1581,43 @@ const InstancesPage = () => {
       return;
     }
 
+    const targetInstanceId = selectedInstanceId;
+    const content = serverPropertiesData.content;
     setServerPropertiesSaving(true);
     setServerPropertiesError("");
 
     try {
-      const result = await updateInstanceServerProperties(selectedInstanceId, {
-        content: serverPropertiesData.content,
+      const result = await updateInstanceServerProperties(targetInstanceId, {
+        content,
       });
+      if (selectedInstanceIdRef.current !== targetInstanceId) {
+        return;
+      }
 
       setServerPropertiesData({
         content: result.content,
         filePath: result.filePath,
         restartRequired: result.restartRequired,
       });
-      await loadInstances(selectedInstanceId);
-      await refreshSelectedInstance(selectedInstanceId);
+      await loadInstances(undefined);
+      if (selectedInstanceIdRef.current === targetInstanceId) {
+        await refreshSelectedInstance(targetInstanceId);
+      }
       setServerPropertiesEditorOpen(false);
       setBanner({
         tone: "info",
         message: "Saved server.properties.",
       });
     } catch (saveError) {
+      if (selectedInstanceIdRef.current !== targetInstanceId) {
+        return;
+      }
+
       setServerPropertiesError(saveError instanceof Error ? saveError.message : "Unable to save server.properties");
     } finally {
-      setServerPropertiesSaving(false);
+      if (selectedInstanceIdRef.current === targetInstanceId) {
+        setServerPropertiesSaving(false);
+      }
     }
   };
 

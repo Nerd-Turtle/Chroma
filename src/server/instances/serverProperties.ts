@@ -1,6 +1,44 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { BedrockServerSettings } from "../../shared/types/serverSettings.js";
+
+const DEFAULT_LEVEL_NAME = "Bedrock level";
+
+export function parseServerPropertiesValues(content: string): Record<string, string> {
+  const values: Record<string, string> = {};
+
+  for (const rawLine of content.split(/\r?\n/)) {
+    const line = rawLine.trim();
+
+    if (line === "" || line.startsWith("#")) {
+      continue;
+    }
+
+    const separatorIndex = line.indexOf("=");
+
+    if (separatorIndex === -1) {
+      continue;
+    }
+
+    const key = line.slice(0, separatorIndex).trim();
+    const value = line.slice(separatorIndex + 1).trim();
+
+    if (key !== "") {
+      values[key] = value;
+    }
+  }
+
+  return values;
+}
+
+export function getLevelNameFromServerProperties(content: string): string {
+  return parseServerPropertiesValues(content)["level-name"]?.trim() || DEFAULT_LEVEL_NAME;
+}
+
+export async function readServerPropertiesLevelName(instancePath: string): Promise<string> {
+  const serverPropertiesPath = join(instancePath, "bds", "server.properties");
+  return getLevelNameFromServerProperties(await readFile(serverPropertiesPath, "utf8"));
+}
 
 export function serializeServerProperties(settings: BedrockServerSettings): string {
   const lines: string[] = [];

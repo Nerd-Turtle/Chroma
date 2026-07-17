@@ -7,7 +7,7 @@ import { getInstance } from "./instanceService.js";
 import { saveInstanceSettings } from "./instanceSettingsRepository.js";
 import { getSettings } from "./instanceSettingsService.js";
 import { appendInstanceRuntimeEvent } from "./instanceRuntimeEventService.js";
-import { serializeServerProperties } from "./serverProperties.js";
+import { parseServerPropertiesValues, serializeServerProperties } from "./serverProperties.js";
 
 function getServerPropertiesPath(instancePath: string): string {
   return join(instancePath, "bds", "server.properties");
@@ -63,33 +63,6 @@ function parseBoolean(value: string, fallback: boolean): boolean {
 function parseInteger(value: string, fallback: number): number {
   const parsed = Number.parseInt(value, 10);
   return Number.isNaN(parsed) ? fallback : parsed;
-}
-
-function parseServerPropertiesValues(content: string): Record<string, string> {
-  const values: Record<string, string> = {};
-
-  for (const rawLine of content.split(/\r?\n/)) {
-    const line = rawLine.trim();
-
-    if (line === "" || line.startsWith("#")) {
-      continue;
-    }
-
-    const separatorIndex = line.indexOf("=");
-
-    if (separatorIndex === -1) {
-      continue;
-    }
-
-    const key = line.slice(0, separatorIndex).trim();
-    const value = line.slice(separatorIndex + 1).trim();
-
-    if (key !== "") {
-      values[key] = value;
-    }
-  }
-
-  return values;
 }
 
 function applyPropertiesToSettings(

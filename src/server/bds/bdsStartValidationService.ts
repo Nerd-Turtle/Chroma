@@ -1,8 +1,12 @@
-import { access, readFile } from "node:fs/promises";
+import { access, readFile, stat } from "node:fs/promises";
 import { createSocket } from "node:dgram";
 import { join } from "node:path";
 import type { Database } from "better-sqlite3";
-import type { BedrockServerSettings, Instance } from "../../shared/types/index.js";
+import type { BedrockServerSettings, Instance, InstanceAddonPack } from "../../shared/types/index.js";
+import { getImportedPackPath } from "../addons/addonApplicationService.js";
+import { listInstanceAddonPacks } from "../addons/addonRepository.js";
+import { listAddonsForInstance } from "../addons/addonService.js";
+import { findExistingActiveWorldPath, readWorldPackReferences, sameWorldPackReference } from "../addons/addonWorldService.js";
 import { listInstances } from "../instances/instanceService.js";
 import { getSettings } from "../instances/instanceSettingsService.js";
 import { getBdsInstall } from "./bdsRepository.js";
@@ -35,6 +39,7 @@ const validators: StartValidator[] = [
   validateSettingsPresence,
   validateExecutableReadable,
   validateServerPropertiesReadable,
+  validateEnabledAddonState,
   validateConfiguredPorts,
   validatePortConflictsWithOtherInstances,
   validateHostPortAvailability,
@@ -132,6 +137,178 @@ async function validateServerPropertiesReadable(context: StartValidationContext)
       },
     ];
   }
+}
+
+function packLabel(pack: InstanceAddonPack): string {
+  return pack.name ?? `${pack.packType} pack ${pack.headerUuid}`;
+}
+
+function parseVersion(value: string): number[] {
+  return value
+    .split(".")
+    .map((part) => Number.parseInt(part, 10))
+    .filter((part) => Number.isInteger(part));
+}
+
+function compareVersions(left: number[], right: number[]): number {
+  const length = Math.max(left.length, right.length);
+
+  for (let index = 0; index < length; index += 1) {
+    const leftPart = left[index] ?? 0;
+    const rightPart = right[index] ?? 0;
+
+    if (leftPart !== rightPart) {
+      return leftPart - rightPart;
+    }
+  }
+
+  return 0;
+}
+
+function packRequiresNewerEngine(pack: InstanceAddonPack, bdsVersion: string): boolean {
+  if (!pack.minEngineVersion || pack.minEngineVersion.length === 0) {
+    return false;
+  }
+
+  const parsedBdsVersion = parseVersion(bdsVersion);
+  if (parsedBdsVersion.length === 0) {
+    return false;
+  }
+
+  return compareVersions(pack.minEngineVersion, parsedBdsVersion) > 0;
+}
+
+async function validateEnabledAddonState(context: StartValidationContext): Promise<BdsStartValidationIssue[]> {
+  const enabledAddons = listAddonsForInstance(context.db, context.instance.id)
+    .filter((addon) => addon.status === "enabled");
+
+  if (enabledAddons.length === 0) {
+    return [];
+  }
+
+  const issues: BdsStartValidationIssue[] = [];
+  const worldPath = await findExistingActiveWorldPath(context.instance);
+  if (!worldPath) {
+    return [
+      {
+        code: "enabled_addon_world_missing",
+        level: "error",
+        field: "addons",
+        message: "Enabled addons require a prepared world directory before the server can start.",
+      },
+    ];
+  }
+
+  const behaviorJsonPath = join(worldPath, "world_behavior_packs.json");
+  const resourceJsonPath = join(worldPath, "world_resource_packs.json");
+  let behaviorReferences: Awaited<ReturnType<typeof readWorldPackReferences>>;
+  let resourceReferences: Awaited<ReturnType<typeof readWorldPackReferences>>;
+
+  try {
+    [behaviorReferences, resourceReferences] = await Promise.all([
+      readWorldPackReferences(behaviorJsonPath),
+      readWorldPackReferences(resourceJsonPath),
+    ]);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return [
+      {
+        code: "enabled_addon_world_references_invalid",
+        level: "error",
+        field: "addons",
+        message: `World addon reference files are invalid: ${message}`,
+      },
+    ];
+  }
+
+  for (const addon of enabledAddons) {
+    const packs = listInstanceAddonPacks(context.db, context.instance.id, addon.id);
+    const enabledPacks = packs.filter((pack) => pack.status === "enabled");
+    const supportedEnabledPacks = enabledPacks.filter((pack) => pack.packType === "behavior" || pack.packType === "resource");
+
+    if (supportedEnabledPacks.length === 0) {
+      issues.push({
+        code: "enabled_addon_has_no_supported_packs",
+        level: "error",
+        field: "addons",
+        message: `Enabled addon "${addon.name}" has no enabled behavior or resource packs.`,
+      });
+    }
+
+    for (const pack of enabledPacks) {
+      if (pack.packType !== "behavior" && pack.packType !== "resource") {
+        issues.push({
+          code: "enabled_addon_pack_unsupported",
+          level: "error",
+          field: "addons",
+          message: `Enabled addon "${addon.name}" includes unsupported ${pack.packType} pack "${packLabel(pack)}".`,
+        });
+      }
+    }
+
+    for (const pack of supportedEnabledPacks) {
+      const expectedEnabledPath = getImportedPackPath(context.instance, pack);
+
+      if (!pack.enabledPath) {
+        issues.push({
+          code: "enabled_addon_pack_missing_path",
+          level: "error",
+          field: "addons",
+          message: `Enabled addon "${addon.name}" is missing an imported folder path for "${packLabel(pack)}".`,
+        });
+        continue;
+      }
+
+      if (pack.enabledPath !== expectedEnabledPath) {
+        issues.push({
+          code: "enabled_addon_pack_missing_path",
+          level: "error",
+          field: "addons",
+          message: `Enabled addon "${addon.name}" has a stale imported folder path for "${packLabel(pack)}".`,
+        });
+      }
+
+      try {
+        if (!(await stat(expectedEnabledPath)).isDirectory()) {
+          issues.push({
+            code: "enabled_addon_pack_missing",
+            level: "error",
+            field: "addons",
+            message: `Enabled addon "${addon.name}" imported pack path is not a directory: ${expectedEnabledPath}`,
+          });
+        }
+      } catch {
+        issues.push({
+          code: "enabled_addon_pack_missing",
+          level: "error",
+          field: "addons",
+          message: `Enabled addon "${addon.name}" imported pack folder is missing: ${expectedEnabledPath}`,
+        });
+      }
+
+      const references = pack.packType === "behavior" ? behaviorReferences : resourceReferences;
+      const referencePath = pack.packType === "behavior" ? behaviorJsonPath : resourceJsonPath;
+      if (!references.some((reference) => sameWorldPackReference(reference, pack))) {
+        issues.push({
+          code: "enabled_addon_pack_unreferenced",
+          level: "error",
+          field: "addons",
+          message: `Enabled addon "${addon.name}" pack "${packLabel(pack)}" is missing from ${referencePath}.`,
+        });
+      }
+
+      if (packRequiresNewerEngine(pack, context.instance.bdsVersion)) {
+        issues.push({
+          code: "enabled_addon_min_engine_newer",
+          level: "warning",
+          field: "addons",
+          message: `Enabled addon "${addon.name}" pack "${packLabel(pack)}" requires engine ${pack.minEngineVersion?.join(".")} but this instance is ${context.instance.bdsVersion}.`,
+        });
+      }
+    }
+  }
+
+  return issues;
 }
 
 async function validateConfiguredPorts(context: StartValidationContext): Promise<BdsStartValidationIssue[]> {
