@@ -2349,7 +2349,18 @@ const InstancesPage = () => {
                               </span>
                               <span className="instance-addon-name" role="cell">
                                 <strong>{addon.name}</strong>
-                                {addon.summary ? <small>{addon.summary}</small> : null}
+                                {addon.status === "error" ? (
+                                  <>
+                                    <small className="instance-addon-error-message">{addon.error ?? "This addon could not be enabled."}</small>
+                                    {addon.websiteUrl ? (
+                                      <a className="instance-addon-error-link" href={addon.websiteUrl} target="_blank" rel="noreferrer">
+                                        View addon page
+                                      </a>
+                                    ) : null}
+                                  </>
+                                ) : addon.summary ? (
+                                  <small>{addon.summary}</small>
+                                ) : null}
                                 <small className={`instance-bds-status ${getAddonStatusToneClass(addon.status)}`}>
                                   {formatLabel(addon.status)}
                                 </small>

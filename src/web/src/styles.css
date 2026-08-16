@@ -2630,6 +2630,26 @@ h2 {
   line-height: 1.35;
 }
 
+.instance-addon-name .instance-addon-error-message {
+  color: #ff9da6;
+}
+
+.instance-addon-error-link {
+  width: fit-content;
+  color: #9fd7ff;
+  font-size: 0.9rem;
+  line-height: 1.35;
+  text-decoration: underline;
+  text-decoration-color: var(--chrome-active);
+  text-underline-offset: 0.18rem;
+}
+
+.instance-addon-error-link:hover,
+.instance-addon-error-link:focus-visible {
+  color: #d8f0ff;
+  outline: none;
+}
+
 .instance-addon-name .instance-bds-status {
   justify-self: start;
 }

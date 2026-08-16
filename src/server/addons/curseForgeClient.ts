@@ -171,9 +171,23 @@ export class CurseForgeClient {
     return files;
   }
 
-  async getModFileDownloadUrl(modId: number, fileId: number): Promise<string> {
-    const response = await this.get<CurseForgeApiResponse<string>>(`/v1/mods/${modId}/files/${fileId}/download-url`, {});
-    return response.data;
+  async getModFileDownloadUrl(modId: number, file: CurseForgeModFile): Promise<string> {
+    if (file.downloadUrl) {
+      return file.downloadUrl;
+    }
+
+    try {
+      const response = await this.get<CurseForgeApiResponse<string>>(`/v1/mods/${modId}/files/${file.id}/download-url`, {});
+      if (response.data) {
+        return response.data;
+      }
+    } catch (error) {
+      if (!(error instanceof CurseForgeApiError) || error.status !== 403) {
+        throw error;
+      }
+    }
+
+    return buildForgeCdnDownloadUrl(file.id, file.fileName);
   }
 
   private async get<T>(path: string, query: Record<string, string>): Promise<T> {
@@ -195,4 +209,15 @@ export class CurseForgeClient {
 
     return response.json() as Promise<T>;
   }
+}
+
+function buildForgeCdnDownloadUrl(fileId: number, fileName: string): string {
+  const id = String(fileId);
+  if (!/^\d{4,}$/.test(id) || fileName.length === 0) {
+    throw new Error("CurseForge did not provide a usable download URL for this file.");
+  }
+
+  const directory = id.slice(0, -3);
+  const suffix = id.slice(-3);
+  return `https://edge.forgecdn.net/files/${directory}/${suffix}/${encodeURIComponent(fileName)}`;
 }

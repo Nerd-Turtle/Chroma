@@ -565,7 +565,7 @@ async function fetchCurseForgeAddonProject(db: Database, input: DownloadCurseFor
 
     try {
       if (!existsSync(paths.archivePath)) {
-        const downloadUrl = await client.getModFileDownloadUrl(input.projectId, file.id);
+        const downloadUrl = await client.getModFileDownloadUrl(input.projectId, file);
         if (!downloadUrl) {
           throw new Error("CurseForge did not provide a download URL for this file.");
         }
