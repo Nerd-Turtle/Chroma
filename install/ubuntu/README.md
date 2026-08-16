@@ -1,5 +1,21 @@
 # Chroma Ubuntu installer assets
 
+The installer is intended to download a prebuilt release archive; it must never clone the Chroma
+repository or compile application code on the target host. Chroma 1.0 supports Ubuntu 26.04 AMD64.
+`install-chroma.sh --disable-version-check` exists only for deliberate compatibility testing on a
+different Ubuntu version, such as Ubuntu 24.04.
+
+Build local release assets with:
+
+```bash
+pnpm build:release
+```
+
+This creates `release/<package-version>/` containing the application archive, SHA-256 checksum,
+and installer script. The archive includes the compiled server, compiled web UI, production
+dependencies, and the pinned Node.js runtime. The target host therefore does not need Node.js,
+pnpm, Git, or a compiler.
+
 The v1 Ubuntu installer will run `generate-self-signed-certificate.sh` after it creates the
 `chroma` service account. The helper creates one long-lived private key and an initial self-signed
 server certificate. It is deliberately idempotent and will not overwrite an existing key or

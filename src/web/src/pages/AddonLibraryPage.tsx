@@ -716,12 +716,12 @@ const AddonLibraryPage = () => {
                       ? `Update available for ${result.name}`
                       : `Download ${result.name}`;
                 const actionTitle = isDownloading
-                  ? "Downloading addon"
+                  ? "Downloading"
                   : isCurrentReleaseDownloaded || isCompleting
-                    ? "Already downloaded"
+                    ? "Downloaded"
                     : hasUpdateAvailable
-                      ? "Update available"
-                      : "Download addon";
+                      ? "Update"
+                      : "Download";
 
                 return (
                   <article key={result.projectId} className="instance-addon-search-row" role="row">
@@ -766,7 +766,7 @@ const AddonLibraryPage = () => {
                         onClick={() => void handleDownload(result)}
                         disabled={downloadingProjectId !== null || isCurrentReleaseDownloaded}
                         aria-label={actionLabel}
-                        title={actionTitle}
+                        data-tooltip={actionTitle}
                       >
                         {isDownloading ? (
                           <LoaderCircle className="icon-action-spinner" aria-hidden="true" />

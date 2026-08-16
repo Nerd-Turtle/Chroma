@@ -975,7 +975,7 @@ h2 {
 
 .addon-library-search-results .instance-addon-search-header,
 .addon-library-search-results .instance-addon-search-row {
-  grid-template-columns: minmax(0, 1fr) 10rem 9rem 11rem 14rem 3rem;
+  grid-template-columns: minmax(0, 1fr) 10rem 9rem 11rem 14rem 5.5rem;
   gap: 0.9rem;
   align-items: start;
   min-width: 0;
@@ -1012,6 +1012,39 @@ h2 {
 .addon-library-search-results .instance-addon-search-row > span:last-child {
   display: flex;
   justify-content: flex-start;
+}
+
+.addon-library-search-results .icon-action[data-tooltip] {
+  position: relative;
+}
+
+.addon-library-search-results .icon-action[data-tooltip]::after {
+  position: absolute;
+  top: calc(100% + 0.35rem);
+  right: 0;
+  z-index: 2;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid rgba(125, 142, 170, 0.35);
+  border-radius: 0.35rem;
+  background: #172233;
+  box-shadow: 0 0.35rem 0.8rem rgba(0, 0, 0, 0.25);
+  color: #f6f7fb;
+  content: attr(data-tooltip);
+  font-size: 0.72rem;
+  line-height: 1.2;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-0.15rem);
+  transition:
+    opacity 120ms ease,
+    transform 120ms ease;
+}
+
+.addon-library-search-results .icon-action[data-tooltip]:hover::after,
+.addon-library-search-results .icon-action[data-tooltip]:focus-visible::after {
+  opacity: 1;
+  transform: translateY(0);
 }
 
 .addon-title-link {

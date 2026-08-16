@@ -1,0 +1,29 @@
+[Unit]
+Description=Chroma Server Manager
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=exec
+User=chroma
+Group=chroma
+WorkingDirectory=/opt/chroma/current/app
+EnvironmentFile=/etc/chroma/chroma.env
+ExecStart=/opt/chroma/current/node/bin/node /opt/chroma/current/app/dist/server/index.js
+Restart=on-failure
+RestartSec=5
+KillMode=process
+TimeoutStopSec=5min
+LimitNOFILE=65536
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/etc/chroma /var/lib/chroma /var/log/chroma
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+
+[Install]
+WantedBy=multi-user.target
