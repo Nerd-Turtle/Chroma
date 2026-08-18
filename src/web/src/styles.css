@@ -1560,7 +1560,12 @@ h2 {
 .instances-list-footer {
   display: flex;
   justify-content: center;
+  gap: 0.75rem;
   padding-top: 0.25rem;
+}
+
+.light-secondary-button {
+  background: rgba(255, 255, 255, 0.14);
 }
 
 .instance-list-header,

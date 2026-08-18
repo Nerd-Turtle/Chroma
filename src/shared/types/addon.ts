@@ -4,6 +4,9 @@ export type AddonProvider = "curseforge" | "manual";
 
 export type InstanceAddonStatus = "downloaded" | "enabled" | "disabled" | "error";
 
+/** Whether this instance addon has an exact artifact in Chroma's shared Addon Library. */
+export type InstanceAddonLibrarySyncStatus = "linked" | "missing";
+
 export type InstanceAddonPackType = "behavior" | "resource" | "skin" | "unknown";
 
 export type InstanceAddonPackStatus = "downloaded" | "enabled" | "disabled" | "unsupported" | "error";
@@ -49,7 +52,10 @@ export type AddonLibraryItem = {
 export type InstanceAddon = {
   id: string;
   instanceId: string;
-  addonFileId: string;
+  /** Undefined for an addon restored from a backup that is not yet in the shared library. */
+  addonFileId?: string;
+  librarySyncStatus: InstanceAddonLibrarySyncStatus;
+  librarySyncMessage?: string;
   sortOrder: number;
   autoUpdateEnabled: boolean;
   provider: AddonProvider;
@@ -80,7 +86,7 @@ export type InstanceAddonPack = {
   id: string;
   instanceId: string;
   addonId: string;
-  addonFilePackId: string;
+  addonFilePackId?: string;
   packType: InstanceAddonPackType;
   name?: string;
   description?: string;

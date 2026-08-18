@@ -46,9 +46,15 @@ function assertChildPath(parentPath: string, childPath: string): void {
   }
 }
 
-function resolveAddonSourcePath(sourcePath: string): string {
+function resolveAddonSourcePath(instance: Instance, sourcePath: string): string {
   const resolvedPath = resolveRuntimeManagedPath(sourcePath);
-  assertChildPath(getAddonDownloadBasePath(), resolvedPath);
+  const libraryRoot = getAddonDownloadBasePath();
+  const restoredAddonRoot = join(instance.instancePath, "csm", "restored-addons");
+  try {
+    assertChildPath(libraryRoot, resolvedPath);
+  } catch {
+    assertChildPath(restoredAddonRoot, resolvedPath);
+  }
   return resolvedPath;
 }
 
@@ -182,7 +188,7 @@ export async function applyEnabledAddonsForInstance(
 
       if (importedPathStatus === "missing") {
         await markRepair(`restored imported pack files for "${addon.name}"`);
-        await copyDirectoryRecursive(resolveAddonSourcePath(pack.sourcePath), importedPath);
+        await copyDirectoryRecursive(resolveAddonSourcePath(instance, pack.sourcePath), importedPath);
       } else if (importedPathStatus !== "directory") {
         throw new Error(`Imported pack path is not a directory: ${importedPath}`);
       }

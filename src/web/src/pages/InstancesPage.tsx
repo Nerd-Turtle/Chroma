@@ -1,5 +1,5 @@
 import { ArrowDownToLine, GripVertical, LoaderCircle, Play, RotateCw, Save, Square, SquarePen, Terminal, Trash2, X } from "lucide-react";
-import { useEffect, useRef, useState, type DragEvent, type FormEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ChangeEvent, type DragEvent, type FormEvent, type ReactNode } from "react";
 import type {
   AddonLibraryItem,
   BdsStartValidationResult,
@@ -16,6 +16,7 @@ import {
   ApiRequestError,
   createInstance,
   createExportBackup,
+  importInstanceBackup,
   autoSortInstanceAddons,
   deleteInstance,
   disableInstanceAddon,
@@ -185,6 +186,10 @@ function getAddonStatusToneClass(status: InstanceAddon["status"]): string {
   }
 
   return "status-stopped";
+}
+
+function isMissingDependencyError(error: string | undefined): boolean {
+  return error?.startsWith("Missing required pack dependencies:") ?? false;
 }
 
 function getAddonPackSummary(addon: { packCounts: InstanceAddon["packCounts"] }): string {
@@ -458,6 +463,7 @@ const InstancesPage = () => {
   const consoleInputRef = useRef<HTMLInputElement | null>(null);
   const deleteDialogCancelRef = useRef<HTMLButtonElement | null>(null);
   const selectedInstanceIdRef = useRef("");
+  const importBackupInputRef = useRef<HTMLInputElement | null>(null);
   const [instances, setInstances] = useState<Instance[]>([]);
   const [instanceBdsStatuses, setInstanceBdsStatuses] = useState<Record<string, BdsInstall>>({});
   const [selectedInstanceId, setSelectedInstanceId] = useState<string>("");
@@ -512,7 +518,7 @@ const InstancesPage = () => {
   const [banner, setBanner] = useState<BannerState | null>(null);
   const notificationDurationMs = useNotificationDurationMs();
   const [updateMenuOpen, setUpdateMenuOpen] = useState(false);
-  const [actionInFlight, setActionInFlight] = useState<"start" | "stop" | "restart" | "backup" | "check-update" | "update" | "">("");
+  const [actionInFlight, setActionInFlight] = useState<"start" | "stop" | "restart" | "backup" | "import" | "check-update" | "update" | "">("");
   const [editingInstance, setEditingInstance] = useState(false);
   const [rightPaneMode, setRightPaneMode] = useState<RightPaneMode>("details");
   const [activeTab, setActiveTab] = useState<RightPaneTab>("overview");
@@ -1031,7 +1037,7 @@ const InstancesPage = () => {
     setAddonLinkEditorLoading(true);
     setAddonLinkEditorSaving(false);
     setAddonLinkLibrary([]);
-    setSelectedAddonFileIds(workspaceData.addons.map((addon) => addon.addonFileId));
+    setSelectedAddonFileIds(workspaceData.addons.flatMap((addon) => addon.addonFileId ? [addon.addonFileId] : []));
     setError("");
     setBanner(null);
 
@@ -1075,7 +1081,9 @@ const InstancesPage = () => {
     try {
       await selectInstanceLibraryAddons(
         selectedInstanceId,
-        workspaceData.addons.filter((currentAddon) => currentAddon.id !== addon.id).map((currentAddon) => currentAddon.addonFileId),
+        workspaceData.addons
+          .filter((currentAddon) => currentAddon.id !== addon.id)
+          .flatMap((currentAddon) => currentAddon.addonFileId ? [currentAddon.addonFileId] : []),
       );
       await refreshSelectedInstance(selectedInstanceId);
       setBanner({
@@ -1427,6 +1435,31 @@ const InstancesPage = () => {
     }
   };
 
+  const handleImportBackup = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+
+    setActionInFlight("import");
+    setError("");
+    setBanner(null);
+    try {
+      const result = await importInstanceBackup(file);
+      await loadInstances(result.instance.id);
+      setRightPaneMode("details");
+      setBanner({
+        tone: result.missingLibraryAddonNames.length > 0 ? "warning" : "info",
+        message: result.missingLibraryAddonNames.length > 0
+          ? `Imported ${result.instance.friendlyName}. ${result.missingLibraryAddonNames.length} addon${result.missingLibraryAddonNames.length === 1 ? " is" : "s are"} not yet in the Addon Library.`
+          : `Imported ${result.instance.friendlyName}.`,
+      });
+    } catch (importError) {
+      setError(importError instanceof Error ? importError.message : "Unable to import backup");
+    } finally {
+      setActionInFlight("");
+    }
+  };
+
   const handleCheckForUpdates = async () => {
     if (!selectedInstanceId || !workspaceData) {
       return;
@@ -1739,6 +1772,13 @@ const InstancesPage = () => {
             ) : null}
 
             <div className="instances-list-footer">
+              <input
+                ref={importBackupInputRef}
+                type="file"
+                accept=".zip,application/zip"
+                hidden
+                onChange={(event) => void handleImportBackup(event)}
+              />
               <button
                 type="button"
                 className="primary-button"
@@ -1749,6 +1789,14 @@ const InstancesPage = () => {
                 }}
               >
                 Create Instance
+              </button>
+              <button
+                type="button"
+                className="secondary-button light-secondary-button"
+                disabled={actionInFlight === "import"}
+                onClick={() => importBackupInputRef.current?.click()}
+              >
+                {actionInFlight === "import" ? "Importing…" : "Import Instance"}
               </button>
             </div>
           </div>
@@ -2349,10 +2397,30 @@ const InstancesPage = () => {
                               </span>
                               <span className="instance-addon-name" role="cell">
                                 <strong>{addon.name}</strong>
-                                {addon.status === "error" ? (
+                                {addon.librarySyncStatus === "missing" ? (
                                   <>
-                                    <small className="instance-addon-error-message">{addon.error ?? "This addon could not be enabled."}</small>
-                                    {addon.websiteUrl ? (
+                                    <small className="instance-addon-error-message">
+                                      {addon.librarySyncMessage ?? "This addon was restored from the backup but is not in Chroma's Addon Library."}
+                                    </small>
+                                    <a
+                                      className="instance-addon-error-link"
+                                      href={`#addon-library?q=${encodeURIComponent(addon.name)}&instanceId=${encodeURIComponent(addon.instanceId)}&addonId=${encodeURIComponent(addon.id)}`}
+                                    >
+                                      Search Addons
+                                    </a>
+                                  </>
+                                ) : addon.status === "error" ? (
+                                  <>
+                                    <small className="instance-addon-error-message">
+                                      {isMissingDependencyError(addon.error)
+                                        ? "This addon requires one or more external packs that are not installed. Search the Addon Library for a compatible dependency."
+                                        : addon.error ?? "This addon could not be enabled."}
+                                    </small>
+                                    {isMissingDependencyError(addon.error) ? (
+                                      <a className="instance-addon-error-link" href={`#addon-library?q=${encodeURIComponent(addon.name)}`}>
+                                        Search Addons
+                                      </a>
+                                    ) : addon.websiteUrl ? (
                                       <a className="instance-addon-error-link" href={addon.websiteUrl} target="_blank" rel="noreferrer">
                                         View addon page
                                       </a>

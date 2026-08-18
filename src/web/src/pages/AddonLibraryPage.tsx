@@ -19,6 +19,7 @@ import {
   getAddonLibrary,
   getAddonUpdateSettings,
   getLibraryCurseForgeAddonProviderStatus,
+  linkRestoredInstanceAddonToLibrary,
   searchLibraryCurseForgeAddons,
   updateAddonLibraryLinks,
   updateAddonUpdateSettings,
@@ -126,7 +127,12 @@ function getAddonPackSummary(addon: AddonLibraryItem): string {
   return parts.length > 0 ? parts.join(", ") : "No packs discovered";
 }
 
-const AddonLibraryPage = () => {
+type AddonLibrarySyncContext = { instanceId: string; addonId: string } | null;
+
+const AddonLibraryPage = ({
+  initialQuery = "",
+  syncContext = null,
+}: { initialQuery?: string; syncContext?: AddonLibrarySyncContext }) => {
   const [libraryAddons, setLibraryAddons] = useState<AddonLibraryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [providerStatus, setProviderStatus] = useState<CurseForgeAddonProviderStatus | null>(null);
@@ -155,6 +161,7 @@ const AddonLibraryPage = () => {
   const [linkedInstanceAutoUpdates, setLinkedInstanceAutoUpdates] = useState<Record<string, boolean>>({});
   const resultsAnchorRef = useRef<HTMLDivElement | null>(null);
   const searchResultsRef = useRef<HTMLDivElement | null>(null);
+  const appliedInitialQueryRef = useRef("");
   const notificationDurationMs = useNotificationDurationMs();
 
   const canBrowse = providerStatus?.resolved === true;
@@ -303,6 +310,18 @@ const AddonLibraryPage = () => {
     }
   }
 
+  useEffect(() => {
+    const trimmedQuery = initialQuery.trim();
+    if (!trimmedQuery || !canBrowse || appliedInitialQueryRef.current === trimmedQuery) {
+      return;
+    }
+
+    appliedInitialQueryRef.current = trimmedQuery;
+    setQuery(trimmedQuery);
+    setActiveAuthorFilter(null);
+    void runSearch(1, { query: trimmedQuery, authorFilter: null });
+  }, [canBrowse, initialQuery]);
+
   async function handleSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     await runSearch(1);
@@ -323,12 +342,28 @@ const AddonLibraryPage = () => {
     setBanner(null);
 
     try {
-      await downloadCurseForgeAddonToLibrary({
+      const downloaded = await downloadCurseForgeAddonToLibrary({
         projectId: result.projectId,
         ...(result.latestFileId ? { fileId: result.latestFileId } : {}),
       });
       await loadLibrary();
       setCompletedDownloadProjectId(result.projectId);
+      if (syncContext) {
+        try {
+          await linkRestoredInstanceAddonToLibrary(syncContext.instanceId, syncContext.addonId, downloaded.addon.id);
+          setBanner({
+            tone: "info",
+            message: `Downloaded ${result.name} and linked it to the restored instance addon.`,
+          });
+          return;
+        } catch (linkError) {
+          setBanner({
+            tone: "warning",
+            message: `Downloaded ${result.name}, but it does not match the restored addon: ${linkError instanceof Error ? linkError.message : "unable to link"}`,
+          });
+          return;
+        }
+      }
       setBanner({
         tone: "info",
         message: `Downloaded ${result.name}.`,

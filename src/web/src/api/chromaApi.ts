@@ -24,6 +24,7 @@ import type {
   InstanceAddonDetailResponse,
   InstanceAddonListResponse,
   InstanceBackupResponse,
+  InstanceBackupImportResponse,
   InstanceBdsStatusResponse,
   InstanceDetailResponse,
   InstanceRuntimeEventsResponse,
@@ -486,6 +487,29 @@ export async function createExportBackup(instanceId: string): Promise<InstanceBa
     method: "POST",
   });
   return readJson<InstanceBackupResponse>(response);
+}
+
+export async function importInstanceBackup(file: File): Promise<InstanceBackupImportResponse> {
+  const body = new FormData();
+  body.append("backup", file);
+  const response = await fetch("/api/instances/backups/import", {
+    method: "POST",
+    body,
+  });
+  return readJson<InstanceBackupImportResponse>(response);
+}
+
+export async function linkRestoredInstanceAddonToLibrary(
+  instanceId: string,
+  addonId: string,
+  addonFileId: string,
+): Promise<InstanceAddonListResponse> {
+  const response = await fetch(`/api/instances/${instanceId}/addons/${addonId}/link-library`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ addonFileId }),
+  });
+  return readJson<InstanceAddonListResponse>(response);
 }
 
 export async function getLatestBdsVersion(): Promise<LatestBdsVersionResponse> {

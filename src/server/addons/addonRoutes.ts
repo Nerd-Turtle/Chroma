@@ -12,6 +12,7 @@ import {
   downloadCurseForgeAddonToLibrary,
   getAddonDetailForInstance,
   getAddonLibraryEditor,
+  linkRestoredAddonToLibrary,
   listAddonLibrary,
   listAddonsForInstance,
   selectLibraryAddonsForInstance,
@@ -237,6 +238,20 @@ export async function registerAddonRoutes(app: FastifyInstance, db: Database): P
 
     try {
       return await selectLibraryAddonsForInstance(db, params.instanceId, body.addonFileIds);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return reply.code(getStatusCodeForMessage(message)).send({ error: message });
+    }
+  });
+
+  app.post("/api/instances/:instanceId/addons/:addonId/link-library", async (request, reply) => {
+    const params = request.params as { instanceId: string; addonId: string };
+    const body = request.body as { addonFileId?: unknown };
+    if (typeof body.addonFileId !== "string" || body.addonFileId === "") {
+      return reply.code(400).send({ error: "addonFileId is required" });
+    }
+    try {
+      return linkRestoredAddonToLibrary(db, params.instanceId, params.addonId, body.addonFileId);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       return reply.code(getStatusCodeForMessage(message)).send({ error: message });

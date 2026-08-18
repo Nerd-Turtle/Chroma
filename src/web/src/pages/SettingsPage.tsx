@@ -426,7 +426,7 @@ const SettingsPage = () => {
             ) : null}
             <button
               type="button"
-              className="secondary-button"
+              className="secondary-button light-secondary-button"
               disabled={!canCreateCsr}
               title={certificateIdentityBroken ? "The existing certificate's private key is unavailable" : undefined}
               onClick={() => openCertificateDrawer("csr")}

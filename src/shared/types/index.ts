@@ -17,6 +17,7 @@ export type {
   InstanceAddonPackCounts,
   InstanceAddonPackStatus,
   InstanceAddonPackType,
+  InstanceAddonLibrarySyncStatus,
   InstanceAddonStatus,
 } from "./addon.js";
 export type { Job, JobStatus } from "./job.js";
@@ -92,5 +93,6 @@ export type {
   LatestBdsVersionResponse,
   InstanceBdsCheckUpdatesResponse,
   InstanceBackupResponse,
+  InstanceBackupImportResponse,
   UpdateInstanceServerPropertiesRequest,
 } from "./web.js";

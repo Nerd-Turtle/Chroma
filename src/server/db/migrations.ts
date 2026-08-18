@@ -149,6 +149,8 @@ export function runMigrations(db: Database): void {
       id TEXT PRIMARY KEY,
       instance_id TEXT NOT NULL,
       addon_file_id TEXT,
+      library_sync_status TEXT NOT NULL DEFAULT 'linked',
+      library_sync_message TEXT,
       sort_order INTEGER NOT NULL DEFAULT 0,
       auto_update_enabled INTEGER NOT NULL DEFAULT 1,
       provider TEXT NOT NULL,
@@ -259,6 +261,12 @@ export function runMigrations(db: Database): void {
   const instanceAddonColumnNames = new Set(instanceAddonColumns.map((column) => column.name));
   if (!instanceAddonColumnNames.has("addon_file_id")) {
     db.exec(`ALTER TABLE instance_addons ADD COLUMN addon_file_id TEXT;`);
+  }
+  if (!instanceAddonColumnNames.has("library_sync_status")) {
+    db.exec(`ALTER TABLE instance_addons ADD COLUMN library_sync_status TEXT NOT NULL DEFAULT 'linked';`);
+  }
+  if (!instanceAddonColumnNames.has("library_sync_message")) {
+    db.exec(`ALTER TABLE instance_addons ADD COLUMN library_sync_message TEXT;`);
   }
   if (!instanceAddonColumnNames.has("auto_update_enabled")) {
     db.exec(`ALTER TABLE instance_addons ADD COLUMN auto_update_enabled INTEGER NOT NULL DEFAULT 1;`);

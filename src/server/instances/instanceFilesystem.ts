@@ -15,6 +15,7 @@ export async function createInstanceDirectories(instance: Instance): Promise<voi
     `${instance.instancePath}/csm/events`,
     `${instance.instancePath}/csm/logs`,
     `${instance.instancePath}/csm/jobs`,
+    `${instance.instancePath}/csm/restored-addons`,
   ];
 
   for (const directory of directories) {

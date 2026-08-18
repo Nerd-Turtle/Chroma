@@ -1,7 +1,11 @@
 import type { FastifyInstance } from "fastify";
+import multipart from "@fastify/multipart";
 import type { Database } from "better-sqlite3";
 import type { CreateInstanceRequest, UpdateInstanceRequest } from "../../shared/types/index.js";
-import { createReadStream } from "node:fs";
+import { createReadStream, createWriteStream } from "node:fs";
+import { mkdir, rm } from "node:fs/promises";
+import { join } from "node:path";
+import { pipeline } from "node:stream/promises";
 import { requireAuthenticated } from "../auth/authGuard.js";
 import {
   createInstance,
@@ -14,9 +18,18 @@ import { listRecentInstanceRuntimeEvents } from "./instanceRuntimeEventService.j
 import { registerAddonRoutes } from "../addons/addonRoutes.js";
 import { registerBdsRoutes } from "../bds/bdsRoutes.js";
 import { registerInstanceSettingsRoutes } from "./instanceSettingsRoutes.js";
-import { createManagedExportBackupZip, getExportBackupRecord } from "./instanceBackupService.js";
+import { createManagedExportBackupZip, getExportBackupRecord, importInstanceBackupZip } from "./instanceBackupService.js";
+import { createId } from "../utils/createId.js";
+import { getRuntimePaths } from "../config/paths.js";
 
 export async function registerInstanceRoutes(app: FastifyInstance, db: Database) {
+  await app.register(multipart, {
+    limits: {
+      files: 1,
+      fileSize: 16 * 1024 * 1024 * 1024,
+    },
+  });
+
   void app.register(async (protectedApp) => {
     protectedApp.addHook("preHandler", requireAuthenticated(db));
 
@@ -187,6 +200,31 @@ export async function registerInstanceRoutes(app: FastifyInstance, db: Database)
         const message = error instanceof Error ? error.message : String(error);
         const statusCode = message === "Instance not found" ? 404 : 400;
         return reply.code(statusCode).send({ error: message });
+      }
+    });
+
+    protectedApp.post("/api/instances/backups/import", async (request, reply) => {
+      const upload = await request.file();
+      if (!upload) {
+        return reply.code(400).send({ error: "A backup ZIP file is required." });
+      }
+      if (!upload.filename.toLowerCase().endsWith(".zip")) {
+        upload.file.resume();
+        return reply.code(400).send({ error: "Backup files must use the .zip extension." });
+      }
+
+      const uploadDirectory = join(getRuntimePaths().dataDir, "imports", "uploads");
+      const uploadPath = join(uploadDirectory, `${createId("backup")}.zip`);
+      try {
+        await mkdir(uploadDirectory, { recursive: true });
+        await pipeline(upload.file, createWriteStream(uploadPath, { flags: "wx" }));
+        const imported = await importInstanceBackupZip(db, uploadPath);
+        return reply.code(201).send(imported);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return reply.code(400).send({ error: message });
+      } finally {
+        await rm(uploadPath, { force: true });
       }
     });
 

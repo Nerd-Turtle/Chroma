@@ -349,3 +349,8 @@ export type InstanceBackupResponse = {
   createdAt: string;
   mode: "internal" | "export";
 };
+
+export type InstanceBackupImportResponse = {
+  instance: Instance;
+  missingLibraryAddonNames: string[];
+};

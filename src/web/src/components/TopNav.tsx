@@ -57,7 +57,7 @@ const TopNav = ({ authenticated, activePage, user, onLogout, onNavigate }: TopNa
       {authenticated && user ? (
         <div className="user-panel">
           <span className="user-name">{user.username}</span>
-          <button type="button" className="secondary-button" onClick={onLogout}>
+          <button type="button" className="secondary-button light-secondary-button" onClick={onLogout}>
             Logout
           </button>
         </div>

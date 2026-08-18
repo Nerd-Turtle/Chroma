@@ -129,6 +129,7 @@ function buildInstanceAddonFromLibraryFile(
     id: addonId,
     instanceId,
     addonFileId: addonFile.id,
+    librarySyncStatus: "linked",
     sortOrder,
     autoUpdateEnabled,
     provider: addonFile.provider,
@@ -229,6 +230,72 @@ export function listAddonsForInstance(db: Database, instanceId: string): Instanc
   return listInstanceAddons(db, instanceId);
 }
 
+/** Link a restored, backup-owned addon to an exact shared-library artifact. */
+export function linkRestoredAddonToLibrary(
+  db: Database,
+  instanceId: string,
+  addonId: string,
+  addonFileId: string,
+): { addons: InstanceAddon[] } {
+  const addon = getInstanceAddon(db, instanceId, addonId);
+  if (!addon) throw new Error("Addon not found");
+  if (addon.librarySyncStatus !== "missing") throw new Error("Addon is already linked to the Addon Library");
+
+  const libraryAddon = getAddonFile(db, addonFileId);
+  if (!libraryAddon) throw new Error("Addon Library item not found");
+  if (
+    libraryAddon.provider !== addon.provider ||
+    libraryAddon.providerProjectId !== addon.providerProjectId ||
+    libraryAddon.providerFileId !== addon.providerFileId
+  ) {
+    throw new Error("The selected library addon is not the exact version required by this restored instance.");
+  }
+
+  const restoredPacks = listInstanceAddonPacks(db, instanceId, addonId);
+  const libraryPacks = listAddonFilePacks(db, addonFileId);
+  const matches = restoredPacks.map((restoredPack) => {
+    const versionJson = JSON.stringify(restoredPack.headerVersion);
+    const libraryPack = libraryPacks.find((candidate) =>
+      candidate.packType === restoredPack.packType &&
+      candidate.headerUuid.toLowerCase() === restoredPack.headerUuid.toLowerCase() &&
+      candidate.headerVersionJson === versionJson,
+    );
+    if (!libraryPack) {
+      throw new Error(`The selected library addon does not contain restored pack "${restoredPack.name ?? restoredPack.headerUuid}".`);
+    }
+    return { restoredPack, libraryPack };
+  });
+
+  const now = new Date().toISOString();
+  db.transaction(() => {
+    db.prepare(
+      `UPDATE instance_addons
+        SET addon_file_id = ?, library_sync_status = 'linked', library_sync_message = NULL,
+            workspace_path = ?, archive_path = ?, extracted_path = ?, updated_at = ?
+        WHERE id = ? AND instance_id = ?`,
+    ).run(
+      addonFileId,
+      libraryAddon.workspacePath,
+      libraryAddon.archivePath ?? null,
+      libraryAddon.extractedPath ?? null,
+      now,
+      addonId,
+      instanceId,
+    );
+
+    const updatePack = db.prepare(
+      `UPDATE instance_addon_packs
+        SET addon_file_pack_id = ?, source_path = ?, updated_at = ?
+        WHERE id = ? AND instance_id = ?`,
+    );
+    for (const { restoredPack, libraryPack } of matches) {
+      updatePack.run(libraryPack.id, libraryPack.sourcePath, now, restoredPack.id, instanceId);
+    }
+  })();
+
+  return { addons: listInstanceAddons(db, instanceId) };
+}
+
 export async function getAddonDetailForInstance(
   db: Database,
   instanceId: string,
@@ -242,6 +309,14 @@ export async function getAddonDetailForInstance(
   const addon = getInstanceAddon(db, instanceId, addonId);
   if (!addon) {
     throw new Error("Addon not found");
+  }
+
+  if (!addon.addonFileId) {
+    return {
+      addon,
+      downloadedFiles: [],
+      packs: listInstanceAddonPacks(db, instanceId, addonId),
+    };
   }
 
   await repairAddonLibraryFileIfNeeded(db, addon.addonFileId);
@@ -371,7 +446,13 @@ export async function selectLibraryAddonsForInstance(
   const currentAddons = listInstanceAddons(db, instanceId);
 
   for (const currentAddon of currentAddons) {
-    if (uniqueAddonFileIds.includes(currentAddon.addonFileId)) {
+    // Restored addons without a shared-library artifact are managed by the
+    // import reconciliation flow. Saving the ordinary library selection must
+    // not silently remove them from the restored instance.
+    if (!currentAddon.addonFileId) {
+      continue;
+    }
+    if (currentAddon.addonFileId && uniqueAddonFileIds.includes(currentAddon.addonFileId)) {
       continue;
     }
 
@@ -722,6 +803,7 @@ export async function downloadCurseForgeAddonForInstance(
     providerProjectId: String(input.projectId),
     providerFileId: String(releaseFileId),
     name: mod.name,
+    librarySyncStatus: "linked",
     status,
     workspacePath: releasePaths.workspacePath,
     providerMetadataJson: JSON.stringify({ project: searchResult, releaseFileId, selectedFiles: files, primaryFile: file }),
