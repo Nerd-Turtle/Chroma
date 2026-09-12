@@ -12,12 +12,12 @@ usage() {
   cat <<'EOF'
 Usage: start-release-qemu-test.sh [options]
 
-Start a disposable Ubuntu 26.04 AMD64 QEMU guest for testing a locally built Chroma release.
+Start a disposable Ubuntu 24.04 or 26.04 AMD64 QEMU guest for testing a locally built Chroma release.
 The guest reaches the release assets at http://10.0.2.2:<http-port>.
 
 Options:
   --release-dir DIRECTORY  Directory containing install-chroma.sh and release assets.
-  --ubuntu-image PATH      Verified Ubuntu 26.04 cloud image to boot.
+  --ubuntu-image PATH      Verified Ubuntu 24.04 or 26.04 cloud image matching the release archive.
   --ssh-port PORT          Host port forwarded to guest SSH. Defaults to 2222.
   --http-port PORT         Host port serving release assets. Defaults to 8080.
   --vm-dir DIRECTORY       Directory for temporary guest files. Defaults to a new /tmp directory.
@@ -82,9 +82,16 @@ main() {
 
   RELEASE_DIRECTORY="$(realpath "${RELEASE_DIRECTORY}")"
   [[ -f "${RELEASE_DIRECTORY}/install-chroma.sh" ]] || fail "Release installer not found. Build the release first."
-  [[ -f "${RELEASE_DIRECTORY}/chroma-ubuntu-26.04-amd64.tar.gz" ]] || fail "Release archive not found."
-  [[ -f "${RELEASE_DIRECTORY}/chroma-ubuntu-26.04-amd64.tar.gz.sha256" ]] || fail "Release checksum not found."
-  [[ -n "${UBUNTU_IMAGE}" ]] || fail "Pass a verified Ubuntu 26.04 cloud image with --ubuntu-image."
+  local release_found=false
+  local ubuntu_version
+  for ubuntu_version in 24.04 26.04; do
+    if [[ -f "${RELEASE_DIRECTORY}/chroma-ubuntu-${ubuntu_version}-amd64.tar.gz" && \
+          -f "${RELEASE_DIRECTORY}/chroma-ubuntu-${ubuntu_version}-amd64.tar.gz.sha256" ]]; then
+      release_found=true
+    fi
+  done
+  [[ "${release_found}" == true ]] || fail "An Ubuntu 24.04 or 26.04 release archive and checksum are required."
+  [[ -n "${UBUNTU_IMAGE}" ]] || fail "Pass a verified Ubuntu 24.04 or 26.04 cloud image with --ubuntu-image."
   UBUNTU_IMAGE="$(realpath "${UBUNTU_IMAGE}")"
   [[ -f "${UBUNTU_IMAGE}" ]] || fail "Ubuntu cloud image not found."
 

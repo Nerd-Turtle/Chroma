@@ -1,9 +1,9 @@
 # Chroma Ubuntu installer assets
 
 The installer is intended to download a prebuilt release archive; it must never clone the Chroma
-repository or compile application code on the target host. Chroma 1.0 supports Ubuntu 26.04 AMD64.
+repository or compile application code on the target host. Chroma supports Ubuntu 24.04 and 26.04 AMD64.
 `install-chroma.sh --disable-version-check` exists only for deliberate compatibility testing on a
-different Ubuntu version, such as Ubuntu 24.04.
+different Ubuntu version, using the 26.04 archive.
 
 Build local release assets with:
 
@@ -15,6 +15,13 @@ This creates `release/<package-version>/` containing the application archive, SH
 and installer script. The archive includes the compiled server, compiled web UI, production
 dependencies, and the pinned Node.js runtime. The target host therefore does not need Node.js,
 pnpm, Git, or a compiler.
+
+Build once on Ubuntu 24.04 AMD64 and once on Ubuntu 26.04 AMD64 with clean dependencies on
+each host. Native dependencies such as SQLite are bundled from that host. The builder names
+the archives `chroma-ubuntu-24.04-amd64.tar.gz` and `chroma-ubuntu-26.04-amd64.tar.gz`;
+publish both archives and their checksums with the installer. The installer selects the archive
+matching the target host. Validate each archive using a matching cloud image with
+`dev/scripts/start-release-qemu-test.sh`.
 
 The v1 Ubuntu installer will run `generate-self-signed-certificate.sh` after it creates the
 `chroma` service account. The helper creates one long-lived private key and an initial self-signed
@@ -33,7 +40,7 @@ CHROMA_TLS_ENABLED=true
 CHROMA_HTTP_REDIRECT_ENABLED=true
 CHROMA_HTTP_HOST=0.0.0.0
 CHROMA_HTTP_PORT=80
-CHROMA_WEB_DIST_DIR=/opt/chroma/web/dist
+CHROMA_WEB_DIST_DIR=/opt/chroma/current/app/web/dist
 ```
 
 Certificate files live under `/etc/chroma/pki`:

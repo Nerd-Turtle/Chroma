@@ -5,7 +5,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 RELEASE_ROOT="${REPO_ROOT}/release"
 NODE_VERSION="${CHROMA_NODE_VERSION:-24.19.0}"
 NODE_PLATFORM="linux-x64"
-ARCHIVE_NAME="chroma-ubuntu-26.04-amd64.tar.gz"
+ARCHIVE_NAME=""
 PACKAGE_VERSION=""
 OUTPUT_DIRECTORY=""
 
@@ -13,7 +13,8 @@ usage() {
   cat <<'EOF'
 Usage: build-release.sh [options]
 
-Build a self-contained Ubuntu 26.04 AMD64 Chroma release archive locally.
+Build a self-contained Chroma release on Ubuntu 24.04 or 26.04 AMD64.
+The archive targets the Ubuntu version of the build host.
 
 Options:
   --output DIRECTORY  Write release assets to DIRECTORY instead of release/<version>.
@@ -68,6 +69,16 @@ require_tools() {
   done
 }
 
+check_platform() {
+  [[ -r /etc/os-release ]] || fail "Unable to identify the build operating system."
+  # shellcheck disable=SC1091
+  source /etc/os-release
+  [[ "${ID:-}" == "ubuntu" && ( "${VERSION_ID:-}" == "24.04" || "${VERSION_ID:-}" == "26.04" ) ]] \
+    || fail "Build releases on Ubuntu 24.04 or 26.04."
+  [[ "$(uname -m)" == "x86_64" ]] || fail "Build releases on AMD64."
+  ARCHIVE_NAME="chroma-ubuntu-${VERSION_ID}-amd64.tar.gz"
+}
+
 download_node_runtime() {
   local node_archive="node-v${NODE_VERSION}-${NODE_PLATFORM}.tar.xz"
   local node_base_url="https://nodejs.org/dist/v${NODE_VERSION}"
@@ -88,6 +99,7 @@ download_node_runtime() {
 main() {
   parse_arguments "$@"
   require_tools
+  check_platform
   trap cleanup EXIT
 
   cd "${REPO_ROOT}"

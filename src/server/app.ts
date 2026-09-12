@@ -44,7 +44,7 @@ export function buildApp(db: Database, options: BuildAppOptions = {}) {
   registerPkiRoutes(app, db, {
     ...(options.onCertificateInstalled ? { onCertificateInstalled: options.onCertificateInstalled } : {}),
   });
-  void registerInstanceRoutes(app, db);
+  registerInstanceRoutes(app, db);
 
   const webDistDir = options.webDistDir ? resolve(options.webDistDir) : undefined;
   if (webDistDir && existsSync(resolve(webDistDir, "index.html"))) {

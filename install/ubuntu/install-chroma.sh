@@ -10,8 +10,8 @@ readonly CHROMA_LOG_DIR="/var/log/chroma"
 readonly CHROMA_RELEASES_DIR="${CHROMA_ROOT}/releases"
 readonly CHROMA_SERVICE_NAME="chroma.service"
 readonly CHROMA_REPOSITORY="Nerd-Turtle/Chroma"
-readonly ARCHIVE_NAME="chroma-ubuntu-26.04-amd64.tar.gz"
-readonly CHECKSUM_NAME="${ARCHIVE_NAME}.sha256"
+ARCHIVE_NAME="chroma-ubuntu-26.04-amd64.tar.gz"
+CHECKSUM_NAME="${ARCHIVE_NAME}.sha256"
 
 requested_version="latest"
 release_base_url=""
@@ -30,7 +30,7 @@ Install a prebuilt Chroma release on Ubuntu AMD64.
 Options:
   --version VERSION          Install a specific release version, for example 1.0.0.
   --release-base-url URL     Override the release download base URL. Intended for local testing.
-  --disable-version-check    Allow an Ubuntu version other than the supported 26.04 release.
+  --disable-version-check    Test another Ubuntu version using the 26.04 release archive.
   --dry-run                  Validate prerequisites and show the planned install without changing the host.
   --yes                      Do not ask for confirmation when replacing an existing install.
   -h, --help                 Show this help text.
@@ -122,11 +122,14 @@ check_platform() {
   source /etc/os-release
   [[ "${ID:-}" == "ubuntu" ]] || fail "Chroma supports Ubuntu hosts only."
 
-  if [[ "${VERSION_ID:-}" != "26.04" ]]; then
+  if [[ "${VERSION_ID:-}" == "24.04" || "${VERSION_ID:-}" == "26.04" ]]; then
+    ARCHIVE_NAME="chroma-ubuntu-${VERSION_ID}-amd64.tar.gz"
+    CHECKSUM_NAME="${ARCHIVE_NAME}.sha256"
+  else
     if [[ "${disable_version_check}" == true ]]; then
       log "Warning: continuing on unsupported Ubuntu ${VERSION_ID:-unknown} because --disable-version-check was supplied."
     else
-      fail "Chroma 1.0 supports Ubuntu 26.04. Use --disable-version-check only for deliberate compatibility testing."
+      fail "Chroma supports Ubuntu 24.04 and 26.04. Use --disable-version-check only for deliberate compatibility testing."
     fi
   fi
 

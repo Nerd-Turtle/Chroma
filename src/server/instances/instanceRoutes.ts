@@ -22,8 +22,9 @@ import { createManagedExportBackupZip, getExportBackupRecord, importInstanceBack
 import { createId } from "../utils/createId.js";
 import { getRuntimePaths } from "../config/paths.js";
 
-export async function registerInstanceRoutes(app: FastifyInstance, db: Database) {
-  await app.register(multipart, {
+export function registerInstanceRoutes(app: FastifyInstance, db: Database): void {
+  // Queue plugins synchronously; Fastify loads them in registration order.
+  void app.register(multipart, {
     limits: {
       files: 1,
       fileSize: 16 * 1024 * 1024 * 1024,

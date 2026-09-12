@@ -2,7 +2,7 @@
 
 ## Project
 
-Chroma Server Manager, abbreviated CSM, is an application hosted on Ubuntu 26.04 that provides management of Minecraft Bedrock Dedicated Server instances and addons.
+Chroma Server Manager, abbreviated CSM, is an application hosted on Ubuntu 24.04 and 26.04 that provides management of Minecraft Bedrock Dedicated Server instances and addons.
 
 ## Primary Goal
 
