@@ -28,6 +28,38 @@ The v1 Ubuntu installer will run `generate-self-signed-certificate.sh` after it 
 server certificate. It is deliberately idempotent and will not overwrite an existing key or
 certificate.
 
+## Install, upgrade, and reinstall behavior
+
+The installer compares the version inside the verified release archive with the version
+recorded by `/opt/chroma/current/release-version`:
+
+| Existing installation | Archive version | Action |
+| --- | --- | --- |
+| None | Any supported version | Install |
+| Present | Newer than installed | Upgrade |
+| Present | Equal to installed | Prompt to reinstall; default is No |
+| Present | Older than installed | Reject the downgrade before stopping Chroma |
+
+`--yes` accepts a same-version reinstall without prompting. Interactive prompts read from
+`/dev/tty`, so they also work when the installer itself is piped into Bash. Without a terminal,
+a same-version reinstall requires `--yes`. Declining a reinstall keeps the existing release
+and still checks its service and HTTPS health before returning success.
+
+The archive is validated and copied before the service stops. Each activation uses a unique
+`/opt/chroma/releases/<version>.<suffix>` directory; previous release directories are retained.
+The installer backs up the database while Chroma is stopped, switches `current`, and preserves
+existing configuration, certificates, worlds, and addon data. Backup names include a random
+suffix to avoid overwriting another backup made within the same second.
+
+Success requires both an active systemd service and a successful local HTTPS health check.
+Service failures print `systemctl status`, recent `journalctl` output, and commands for further
+inspection. If a failure occurs after stopping but before switching releases, the installer
+attempts to restart the unchanged previous installation. It does not automatically roll back
+after activation because the new application may already have migrated the database.
+
+`--dry-run` reports the planned steps without downloading an archive, prompting, or changing
+the host. The exact version decision requires an actual archive download.
+
 ## Production HTTPS contract
 
 The installer should set these environment values for the systemd service:

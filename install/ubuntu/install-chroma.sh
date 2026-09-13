@@ -20,6 +20,13 @@ dry_run=false
 assume_yes=false
 temporary_download_dir=""
 temporary_release_dir=""
+installed_version=""
+release_version=""
+install_action="install"
+previous_service_running=false
+service_changes_started=false
+release_activated=false
+diagnostics_shown=false
 
 usage() {
   cat <<'EOF'
@@ -32,7 +39,7 @@ Options:
   --release-base-url URL     Override the release download base URL. Intended for local testing.
   --disable-version-check    Test another Ubuntu version using the 26.04 release archive.
   --dry-run                  Validate prerequisites and show the planned install without changing the host.
-  --yes                      Do not ask for confirmation when replacing an existing install.
+  --yes                      Accept reinstalling an already-installed version without prompting.
   -h, --help                 Show this help text.
 EOF
 }
@@ -48,6 +55,16 @@ fail() {
 
 cleanup() {
   local exit_code=$?
+
+  if [[ "${exit_code}" -ne 0 && "${service_changes_started}" == true ]]; then
+    show_service_diagnostics
+    # Before activation the old application and unit are still intact. After
+    # activation, automatic rollback could conflict with database migrations.
+    if [[ "${previous_service_running}" == true && "${release_activated}" == false ]]; then
+      log "Attempting to restart the unchanged previous installation."
+      systemctl start "${CHROMA_SERVICE_NAME}" || true
+    fi
+  fi
 
   if [[ -n "${temporary_download_dir}" && -d "${temporary_download_dir}" ]]; then
     rm -rf -- "${temporary_download_dir}"
@@ -196,17 +213,76 @@ archive_is_safe() {
   '
 }
 
-confirm_existing_install() {
-  [[ -L "${CHROMA_ROOT}/current" || ! -e "${CHROMA_ROOT}/current" ]] || fail "${CHROMA_ROOT}/current exists but is not a release symlink. Refusing to replace it."
-
-  if [[ ! -e "${CHROMA_ROOT}/current" || "${assume_yes}" == true ]]; then
+detect_existing_install() {
+  local current="${CHROMA_ROOT}/current"
+  if [[ ! -e "${current}" && ! -L "${current}" ]]; then
+    log "No existing Chroma installation found."
     return
   fi
 
-  printf 'An existing Chroma installation was found. Continue and create a database backup? [y/N] '
-  local reply=""
-  read -r reply
-  [[ "${reply}" =~ ^[Yy]([Ee][Ss])?$ ]] || fail "Installation cancelled."
+  [[ -L "${current}" && -d "${current}" ]] || fail "${current} is not a valid release symlink. Refusing to replace it."
+  local resolved_current
+  resolved_current="$(readlink -f "${current}")"
+  [[ "${resolved_current}" == "${CHROMA_RELEASES_DIR}/"* ]] || fail "Current release is outside ${CHROMA_RELEASES_DIR}."
+  installed_version="$(read_release_version "${current}")"
+  log "Installed Chroma version: ${installed_version}"
+}
+
+compare_release_versions() {
+  # Use the bundled runtime so the target host needs no system Node.js. Compare
+  # SemVer components numerically and prerelease identifiers by SemVer rules.
+  "${temporary_release_dir}/chroma/node/bin/node" --input-type=module - "${release_version}" "${installed_version:-${release_version}}" <<'JS'
+const parse = (version) => {
+  const match = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/.exec(version);
+  if (!match) throw new Error(`Invalid release version: ${version}`);
+  const pre = match[4]?.split(".") ?? [];
+  if (pre.some(part => /^0\d+$/.test(part))) throw new Error(`Invalid prerelease version: ${version}`);
+  return { core: match.slice(1, 4).map(BigInt), pre };
+};
+const compare = (a, b) => a < b ? -1 : a > b ? 1 : 0;
+const left = parse(process.argv[2]);
+const right = parse(process.argv[3]);
+let result = 0;
+for (let i = 0; i < 3 && result === 0; i++) result = compare(left.core[i], right.core[i]);
+if (result === 0 && (left.pre.length === 0 || right.pre.length === 0)) {
+  result = compare(Number(left.pre.length === 0), Number(right.pre.length === 0));
+} else if (result === 0) {
+  for (let i = 0; i < Math.max(left.pre.length, right.pre.length) && result === 0; i++) {
+    const a = left.pre[i], b = right.pre[i];
+    if (a === undefined || b === undefined) result = a === undefined ? -1 : 1;
+    else if (/^\d+$/.test(a) && /^\d+$/.test(b)) result = compare(BigInt(a), BigInt(b));
+    else if (/^\d+$/.test(a) !== /^\d+$/.test(b)) result = /^\d+$/.test(a) ? -1 : 1;
+    else result = compare(a, b);
+  }
+}
+console.log(result);
+JS
+}
+
+choose_install_action() {
+  local comparison
+  comparison="$(compare_release_versions)" || fail "Unable to compare release versions using the bundled Node.js runtime."
+  if [[ -z "${installed_version}" ]]; then
+    install_action="install"
+  elif [[ "${comparison}" == "1" ]]; then
+    install_action="upgrade"
+  elif [[ "${comparison}" == "-1" ]]; then
+    fail "Downgrade refused: installed Chroma ${installed_version} is newer than release ${release_version}. The existing installation has not been stopped."
+  else
+    install_action="reinstall"
+    if [[ "${assume_yes}" != true ]]; then
+      printf 'Chroma %s is already installed. Reinstall application files and preserve configuration and data? [y/N] ' "${installed_version}"
+      local reply=""
+      if ! { read -r reply </dev/tty; } 2>/dev/null; then
+        fail "Reinstall requires an interactive terminal, or --yes to explicitly accept it."
+      fi
+      if [[ ! "${reply}" =~ ^[Yy]([Ee][Ss])?$ ]]; then
+        install_action="keep"
+        log "Keeping the existing installation."
+      fi
+    fi
+  fi
+  log "Selected action: ${install_action} (release ${release_version})"
 }
 
 create_service_account_and_paths() {
@@ -227,15 +303,18 @@ backup_database() {
   [[ -f "${database_path}" ]] || return 0
 
   local backup_dir="${CHROMA_DATA_DIR}/backups/installer"
-  local backup_path="${backup_dir}/chroma.sqlite.$(date -u +%Y%m%dT%H%M%SZ).bak"
-  log "Backing up the Chroma database to ${backup_path}"
   run install -d -o "${CHROMA_USER}" -g "${CHROMA_GROUP}" -m 0750 "${backup_dir}"
+  local backup_path
+  backup_path="$(mktemp "${backup_dir}/chroma.sqlite.$(date -u +%Y%m%dT%H%M%SZ).XXXXXX.bak")"
+  log "Backing up the Chroma database to ${backup_path}"
   run cp --preserve=mode,timestamps "${database_path}" "${backup_path}"
   run chown "${CHROMA_USER}:${CHROMA_GROUP}" "${backup_path}"
 }
 
 stop_existing_service() {
+  service_changes_started=true
   if systemctl is-active --quiet "${CHROMA_SERVICE_NAME}"; then
+    previous_service_running=true
     log "Stopping the existing Chroma service. Managed Bedrock servers will be stopped cleanly."
     run systemctl stop "${CHROMA_SERVICE_NAME}"
   fi
@@ -250,39 +329,42 @@ read_release_version() {
   printf '%s' "${release_version}"
 }
 
-install_release() {
+stage_release() {
   local archive_path="${temporary_download_dir}/${ARCHIVE_NAME}"
-
-  if [[ "${dry_run}" == true ]]; then
-    log "Would extract and activate the downloaded release under ${CHROMA_RELEASES_DIR}."
-    return
-  fi
-
   archive_is_safe "${archive_path}" || fail "Release archive has an unsafe layout."
-  temporary_release_dir="$(mktemp -d "${CHROMA_RELEASES_DIR}/.install.XXXXXX")"
+  temporary_release_dir="$(mktemp -d "${temporary_download_dir}/extracted.XXXXXX")"
   tar --extract --gzip --file "${archive_path}" --directory "${temporary_release_dir}" --no-same-owner
 
   local extracted_release="${temporary_release_dir}/chroma"
-  local release_version
   release_version="$(read_release_version "${extracted_release}")"
-  local target_release="${CHROMA_RELEASES_DIR}/${release_version}"
+  if [[ "${requested_version}" != "latest" && "${requested_version}" != "${release_version}" ]]; then
+    fail "Requested release ${requested_version}, but the archive contains ${release_version}."
+  fi
 
   [[ -d "${extracted_release}/app/dist/server" ]] || fail "Release archive is missing the compiled server."
   [[ -d "${extracted_release}/app/web/dist" ]] || fail "Release archive is missing the compiled web UI."
   [[ -x "${extracted_release}/node/bin/node" ]] || fail "Release archive is missing the bundled Node runtime."
   [[ -f "${extracted_release}/systemd/chroma.service" ]] || fail "Release archive is missing the systemd unit."
   [[ -x "${extracted_release}/install/generate-self-signed-certificate.sh" ]] || fail "Release archive is missing the certificate helper."
+  log "Validated release ${release_version}."
+}
 
-  if [[ -e "${target_release}" ]]; then
-    fail "Release ${release_version} is already installed at ${target_release}. Refusing to overwrite it."
-  fi
+install_release() {
+  # Each activation has its own directory, including same-version reinstalls.
+  # Copy before stopping so disk-space or copy errors leave Chroma running.
+  local target_release
+  target_release="$(mktemp -d "${CHROMA_RELEASES_DIR}/${release_version}.XXXXXX")"
+  cp -a "${temporary_release_dir}/chroma/." "${target_release}/"
+  chmod 0755 "${target_release}"
 
-  mv "${extracted_release}" "${target_release}"
-  rmdir "${temporary_release_dir}"
-  temporary_release_dir=""
-
-  ln -s "${target_release}" "${CHROMA_ROOT}/.current.new"
-  mv -Tf "${CHROMA_ROOT}/.current.new" "${CHROMA_ROOT}/current"
+  stop_existing_service
+  backup_database
+  local activation_directory
+  activation_directory="$(mktemp -d "${CHROMA_ROOT}/.activate.XXXXXX")"
+  ln -s "${target_release}" "${activation_directory}/current"
+  mv -Tf "${activation_directory}/current" "${CHROMA_ROOT}/current"
+  release_activated=true
+  rmdir "${activation_directory}"
 }
 
 install_configuration_and_service() {
@@ -325,6 +407,17 @@ EOF
   systemctl start "${CHROMA_SERVICE_NAME}"
 }
 
+show_service_diagnostics() {
+  if [[ "${diagnostics_shown}" == true ]]; then
+    return
+  fi
+  diagnostics_shown=true
+  systemctl status "${CHROMA_SERVICE_NAME}" --no-pager --full >&2 || true
+  journalctl --unit "${CHROMA_SERVICE_NAME}" --no-pager -n 50 >&2 || true
+  printf 'Inspect with: sudo systemctl status %s --no-pager --full\n' "${CHROMA_SERVICE_NAME}" >&2
+  printf '             sudo journalctl -u %s --no-pager -n 50\n' "${CHROMA_SERVICE_NAME}" >&2
+}
+
 verify_service() {
   if [[ "${dry_run}" == true ]]; then
     log "Would verify the service and https://127.0.0.1/health."
@@ -332,7 +425,7 @@ verify_service() {
   fi
 
   systemctl is-active --quiet "${CHROMA_SERVICE_NAME}" || {
-    journalctl --unit "${CHROMA_SERVICE_NAME}" --no-pager -n 50 >&2 || true
+    show_service_diagnostics
     fail "The Chroma service did not start."
   }
 
@@ -340,19 +433,21 @@ verify_service() {
   # process up to one minute to initialise the database, TLS, and listeners.
   local attempt
   for attempt in {1..60}; do
-    if curl --fail --silent --insecure --max-time 2 https://127.0.0.1/health >/dev/null 2>&1; then
+    if curl --fail --silent --insecure --max-time 2 https://127.0.0.1/health >/dev/null 2>&1 &&
+       systemctl is-active --quiet "${CHROMA_SERVICE_NAME}"; then
+      log "Chroma service is running and its HTTPS health check passed."
       return
     fi
 
     if ! systemctl is-active --quiet "${CHROMA_SERVICE_NAME}"; then
-      journalctl --unit "${CHROMA_SERVICE_NAME}" --no-pager -n 50 >&2 || true
+      show_service_diagnostics
       fail "The Chroma service stopped before it passed its local health check."
     fi
 
     sleep 1
   done
 
-  journalctl --unit "${CHROMA_SERVICE_NAME}" --no-pager -n 50 >&2 || true
+  show_service_diagnostics
   fail "Chroma did not pass its local health check within one minute."
 }
 
@@ -361,18 +456,29 @@ main() {
   parse_arguments "$@"
   require_root
   check_platform
-  install_prerequisites
+  detect_existing_install
   resolve_release_base_url
-  confirm_existing_install
-  create_service_account_and_paths
+  if [[ "${dry_run}" == true ]]; then
+    log "Would download and validate release ${requested_version} from ${release_base_url}."
+    log "Would compare archive and installed versions: install, upgrade, prompt to reinstall, or reject downgrade."
+    log "No changes made; the exact action requires downloading the archive."
+    verify_service
+    return
+  fi
+  install_prerequisites
   download_and_verify_release
-  stop_existing_service
-  backup_database
+  stage_release
+  choose_install_action
+  if [[ "${install_action}" == "keep" ]]; then
+    verify_service
+    return
+  fi
+  create_service_account_and_paths
   install_release
   install_configuration_and_service
   verify_service
-  log "Chroma installation complete. Open https://<this-host>/ in a browser."
-  log "A self-signed certificate was created; replace it in Chroma Settings to remove the browser warning."
+  log "Chroma ${install_action} complete (${release_version}). Open https://<this-host>/ in a browser."
+  log "Manage the HTTPS certificate in Chroma Settings."
 }
 
 main "$@"
