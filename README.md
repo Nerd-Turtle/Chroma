@@ -5,7 +5,7 @@
 <h1 align="center">Chroma Server Manager</h1>
 
 <p align="center">
-  Your Bedrock servers, worlds, and addons. One place to manage them.
+  Deploy, manage, and mod multiple Minecraft Bedrock servers from one WebUI!
 </p>
 
 <p align="center">
@@ -17,14 +17,14 @@
 </p>
 
 Chroma is a self-hosted web application for managing Minecraft Bedrock Dedicated
-Server instances on Ubuntu. Create a server, configure its world, choose its
+Server instances. Create a server, configure its world, choose its
 addons, and follow its activity from your browser.
 
 **Early development · Ubuntu 24.04 / 26.04 · AMD64 · MIT licensed**
 
 ![Chroma dashboard showing host resource usage, instance health, and player counts](docs/images/dashboard.png)
 
-## A home for every server
+## An Instance for every server
 
 Keep a survival world, a creative playground, and an addon test server in separate
 instances. Each instance has its own Bedrock installation, settings, worlds,
