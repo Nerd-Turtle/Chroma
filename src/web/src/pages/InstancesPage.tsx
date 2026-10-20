@@ -46,6 +46,7 @@ import {
   updateInstanceServerProperties,
 } from "../api/chromaApi.js";
 import { useNotificationDurationMs } from "../components/useNotificationDurationMs.js";
+import AddonUpdatesPanel from "../components/AddonUpdatesPanel.js";
 
 type InstanceWorkspaceData = {
   instance: Instance;
@@ -2348,6 +2349,9 @@ const InstancesPage = () => {
 
                 {activeTab === "addons" ? (
                   <div className="instance-details-sections instance-details-sections-single">
+                    <AddonUpdatesPanel instanceId={workspaceData.instance.id} onUpdatesApplied={() => {
+                      void refreshSelectedInstance(workspaceData.instance.id).catch((failure: unknown) => setError(failure instanceof Error ? failure.message : "Unable to refresh addon versions."));
+                    }} />
                     <section className="instance-detail-section">
                       <div className="instance-detail-section-header">
                         <div className="instance-detail-section-copy">
@@ -2714,7 +2718,7 @@ const InstancesPage = () => {
 
                       <div className="instances-toggle-row">
                         <div className="instances-toggle-copy">
-                          <strong>Enable automatic updating</strong>
+                          <strong>Enable automatic Bedrock and addon updates</strong>
                           <span>
                             {instanceEditor.automaticUpdatesEnabled ? "Automatic updating enabled" : "Automatic updating disabled"}
                           </span>

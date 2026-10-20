@@ -1,5 +1,7 @@
+import { assertNoAddonUpdateInProgress, runInstanceMutation } from "../instances/addonUpdateControl.js";
 import type { Database } from "better-sqlite3";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, rm } from "node:fs/promises";
+import { downloadAddonFile, runAddonProjectDownload } from "./addonDownloadService.js";
 import { existsSync } from "node:fs";
 import { relative, resolve, sep } from "node:path";
 import type { AddonLibraryItem, AddonLibraryLinkedInstance, CurseForgeAddonSearchResult, InstanceAddon, InstanceAddonPack } from "../../shared/types/index.js";
@@ -215,6 +217,9 @@ export async function deleteAddonFromLibrary(db: Database, addonFileId: string):
   if (addon.registeredInstanceCount > 0) {
     throw new Error("Remove this addon from all instances before deleting it from the library.");
   }
+  if (db.prepare("SELECT 1 FROM addon_instance_updates WHERE (target_file_id=? OR previous_file_id=?) AND state IN ('pending','applying')").get(addonFileId, addonFileId)) {
+    throw new Error("This version is reserved for a pending instance addon update.");
+  }
 
   deleteAddonFileById(db, addonFileId);
   assertManagedAddonPath(addon.workspacePath);
@@ -237,6 +242,9 @@ export function linkRestoredAddonToLibrary(
   addonId: string,
   addonFileId: string,
 ): { addons: InstanceAddon[] } {
+  const instance = getInstance(db, instanceId);
+  if (!instance) throw new Error("Instance not found");
+  assertNoAddonUpdateInProgress(instance);
   const addon = getInstanceAddon(db, instanceId, addonId);
   if (!addon) throw new Error("Addon not found");
   if (addon.librarySyncStatus !== "missing") throw new Error("Addon is already linked to the Addon Library");
@@ -341,7 +349,7 @@ export async function getAddonLibraryEditor(
   };
 }
 
-export async function updateAddonLibraryLinks(
+async function updateAddonLibraryLinksUnlocked(
   db: Database,
   addonFileId: string,
   links: Array<{ instanceId: string; autoUpdateEnabled: boolean }>,
@@ -430,7 +438,7 @@ export async function updateAddonLibraryLinks(
   return await getAddonLibraryEditor(db, addonFileId);
 }
 
-export async function selectLibraryAddonsForInstance(
+async function selectLibraryAddonsForInstanceUnlocked(
   db: Database,
   instanceId: string,
   addonFileIds: string[],
@@ -488,7 +496,7 @@ export async function selectLibraryAddonsForInstance(
 
     const addonId = existingAddon?.id ?? createId("addon");
     const sortOrder = existingAddon?.sortOrder ?? getNextInstanceAddonSortOrder(db, instanceId);
-    const addon = buildInstanceAddonFromLibraryFile(addonFile, instanceId, now, true, sortOrder, addonId);
+    const addon = buildInstanceAddonFromLibraryFile(addonFile, instanceId, now, existingAddon?.autoUpdateEnabled ?? true, sortOrder, addonId);
     const packs = await buildInstanceAddonPacksFromLibraryFile(db, addonFile.id, instanceId, addonId, now);
 
     saveInstanceAddonWithPacks(db, addon, packs);
@@ -502,6 +510,7 @@ export async function selectLibraryAddonsForInstance(
 export type DownloadCurseForgeAddonInput = {
   projectId: number;
   fileId?: number;
+  stableOnly?: boolean;
 };
 
 type InspectedCurseForgeAddonPack = {
@@ -547,14 +556,19 @@ function selectCurseForgeReleaseFiles(
   mod: CurseForgeMod,
   files: CurseForgeModFile[],
   requestedFileId: number | undefined,
+  stableOnly = false,
 ): { releaseFileId: number; files: CurseForgeModFile[] } {
   const installableFiles = files
+    .filter((file) => !stableOnly || (file.releaseType === 1 && file.isAvailable === true))
     .filter((file) => file.isAvailable !== false)
     .filter(isBedrockAddonArchive)
     .sort(compareCurseForgeFileDateDesc);
 
   if (installableFiles.length === 0) {
     throw new Error("CurseForge did not return any Bedrock addon files for this project.");
+  }
+  if (requestedFileId && !installableFiles.some((file) => file.id === requestedFileId)) {
+    throw new Error("The selected addon release is no longer available.");
   }
 
   const anchor =
@@ -630,7 +644,7 @@ async function fetchCurseForgeAddonProject(db: Database, input: DownloadCurseFor
     client.getMod(input.projectId),
     client.getModFiles(input.projectId),
   ]);
-  const selectedRelease = selectCurseForgeReleaseFiles(mod, projectFiles, input.fileId);
+  const selectedRelease = selectCurseForgeReleaseFiles(mod, projectFiles, input.fileId, input.stableOnly);
   const releasePaths = getCurseForgeAddonReleaseStoragePaths(input.projectId, selectedRelease.releaseFileId);
   const downloadedFiles: DownloadedCurseForgeAddonFile[] = [];
   const discoveredPacks: InspectedCurseForgeAddonPack[] = [];
@@ -652,7 +666,7 @@ async function fetchCurseForgeAddonProject(db: Database, input: DownloadCurseFor
         }
 
         await mkdir(paths.archiveDirectory, { recursive: true });
-        await downloadFile(downloadUrl, paths.archivePath);
+        await downloadAddonFile(downloadUrl, paths.archivePath, file);
       }
 
       filePacks = await inspectAddonArchive(paths.archivePath, paths.extractedPath);
@@ -715,16 +729,6 @@ async function fetchCurseForgeAddonProject(db: Database, input: DownloadCurseFor
   };
 }
 
-async function downloadFile(downloadUrl: string, archivePath: string): Promise<void> {
-  const response = await fetch(downloadUrl);
-  if (!response.ok) {
-    throw new Error(`CurseForge file download failed with status ${response.status}`);
-  }
-
-  const buffer = Buffer.from(await response.arrayBuffer());
-  await writeFile(archivePath, buffer, { flag: "wx" });
-}
-
 function mapModToSearchResult(mod: CurseForgeMod, fileId: number): CurseForgeAddonSearchResult {
   const latestFile = mod.latestFiles?.find((file) => file.id === fileId) ?? mod.latestFiles?.find((file) => file.id === mod.mainFileId);
   const result: CurseForgeAddonSearchResult = {
@@ -755,7 +759,7 @@ function mapModToSearchResult(mod: CurseForgeMod, fileId: number): CurseForgeAdd
   return result;
 }
 
-export async function downloadCurseForgeAddonForInstance(
+async function downloadCurseForgeAddonForInstanceUnlocked(
   db: Database,
   instanceId: string,
   input: DownloadCurseForgeAddonInput,
@@ -869,7 +873,7 @@ export async function downloadCurseForgeAddonForInstance(
   return await getAddonDetailForInstance(db, instanceId, addonId);
 }
 
-export async function downloadCurseForgeAddonToLibrary(
+async function downloadCurseForgeAddonToLibraryUnlocked(
   db: Database,
   input: DownloadCurseForgeAddonInput,
 ): Promise<{ addon: AddonLibraryItem }> {
@@ -927,4 +931,32 @@ export async function downloadCurseForgeAddonToLibrary(
   }
 
   return { addon: savedAddon };
+}
+
+export async function updateAddonLibraryLinks(db: Database, addonFileId: string, links: Array<{ instanceId: string; autoUpdateEnabled: boolean }>) {
+  const ids = [...new Set([...links.map((link) => link.instanceId), ...listAddonLibraryLinkedInstances(db, addonFileId).filter((item) => item.linked).map((item) => item.instanceId)])].sort();
+  async function reserve(index: number): Promise<Awaited<ReturnType<typeof updateAddonLibraryLinksUnlocked>>> {
+    const id = ids[index];
+    if (!id) return updateAddonLibraryLinksUnlocked(db, addonFileId, links);
+    const instance = getInstance(db, id);
+    if (!instance) throw new Error("Instance not found");
+    return runInstanceMutation(instance, () => reserve(index + 1));
+  }
+  return reserve(0);
+}
+
+export async function selectLibraryAddonsForInstance(db: Database, instanceId: string, addonFileIds: string[]) {
+  const instance = getInstance(db, instanceId);
+  if (!instance) throw new Error("Instance not found");
+  return runInstanceMutation(instance, () => selectLibraryAddonsForInstanceUnlocked(db, instanceId, addonFileIds));
+}
+
+export async function downloadCurseForgeAddonForInstance(db: Database, instanceId: string, input: DownloadCurseForgeAddonInput) {
+  const instance = getInstance(db, instanceId);
+  if (!instance) throw new Error("Instance not found");
+  return runInstanceMutation(instance, () => runAddonProjectDownload(db, input.projectId, () => downloadCurseForgeAddonForInstanceUnlocked(db, instanceId, input)));
+}
+
+export async function downloadCurseForgeAddonToLibrary(db: Database, input: DownloadCurseForgeAddonInput): Promise<{ addon: AddonLibraryItem }> {
+  return runAddonProjectDownload(db, input.projectId, () => downloadCurseForgeAddonToLibraryUnlocked(db, input));
 }

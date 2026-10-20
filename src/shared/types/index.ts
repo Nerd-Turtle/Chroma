@@ -21,6 +21,7 @@ export type {
   InstanceAddonStatus,
 } from "./addon.js";
 export type { Job, JobStatus } from "./job.js";
+export type { ChromaUpdateSettings, ChromaRelease, ChromaUpgradeProgress, ChromaUpdateStatus } from "./chromaUpdate.js";
 export type { BdsInstall, BdsInstallStatus } from "./bds.js";
 export type { BdsConsoleLine, BdsConsoleSnapshot, BdsConsoleSource } from "./bdsConsole.js";
 export type {
@@ -96,3 +97,4 @@ export type {
   InstanceBackupImportResponse,
   UpdateInstanceServerPropertiesRequest,
 } from "./web.js";
+export type { AddonLibraryUpdateCheck, InstanceAddonUpdate, AddonUpdateSummary } from "./addonUpdate.js";

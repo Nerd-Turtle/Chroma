@@ -16,6 +16,7 @@ export type AuthUser = {
 };
 
 export type SessionRecord = {
+  /** SHA-256 hash of the browser token, used only for server-side lookup. */
   id: string;
   userId: string;
   createdAt: string;

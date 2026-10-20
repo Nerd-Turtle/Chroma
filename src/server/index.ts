@@ -7,6 +7,7 @@ import { ensureRuntimePaths, getDatabasePath, getPkiPaths, getRuntimePaths } fro
 import { openDatabase } from "./db/database.js";
 import { runMigrations } from "./db/migrations.js";
 import { startInstanceAutoUpdateScheduler } from "./instances/instanceAutoUpdateService.js";
+import { AddonUpdateService } from "./addons/addonUpdateService.js";
 import { setupShutdownHandlers } from "./lifecycle/shutdown.js";
 
 const tlsEnabled = process.env.CHROMA_TLS_ENABLED === "true";
@@ -74,7 +75,9 @@ try {
     : undefined;
 
   let app: ReturnType<typeof buildApp>;
+  const addonUpdates = new AddonUpdateService(db);
   app = buildApp(db, {
+    addonUpdates,
     ...(tlsMaterial ? { https: tlsMaterial } : {}),
     webDistDir: process.env.CHROMA_WEB_DIST_DIR ?? `${runtimePaths.appDir}/web/dist`,
     ...(tlsEnabled
@@ -87,10 +90,10 @@ try {
   });
   initializeBdsRuntimeStateSynchronization(db, app.log);
   await reconcileBdsRuntimeStates(db, app.log);
-  startInstanceAutoUpdateScheduler(db, app.log);
 
   app.log.info({ runtime: runtimePaths, databasePath, tlsEnabled }, "Chroma starting");
   await app.listen({ host, port });
+  startInstanceAutoUpdateScheduler(db, app.log, addonUpdates);
   const redirectServer = await startHttpRedirectServer(port);
   setupShutdownHandlers(app, db, redirectServer);
   if (redirectServer) {

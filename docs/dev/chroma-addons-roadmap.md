@@ -983,23 +983,46 @@ Treat a CurseForge addon download as a project release set instead of a single p
 
 Implemented on the current branch/worktree. Chroma now requests CurseForge project files, downloads the selected release's sibling archives into one workspace, stores per-file status/error records, and parses all discovered packs as one addon.
 
-## Phase 5: Provider-Aware Update Checks
+## Phase 5: Central Downloads and Scheduled Instance Updates
 
 ### Objective
 
-Let Chroma tell whether a downloaded CurseForge addon has a newer file available.
+Download stable CurseForge releases centrally and let opted-in instances adopt
+compatible releases on their existing schedules.
 
 ### Scope
 
-- Query provider files for an existing project.
-- Compare current `provider_file_id` and file dates.
-- Surface update availability in the Addons table.
-- Do not auto-update addons in this phase.
+- The library schedule checks each downloaded project once and retains old releases.
+- Instance schedules queue compatible downloaded releases, respecting both the
+  instance automatic-update setting and each addon link's opt-in preference.
+- Applying a queued release waits for that instance to be stopped and idle.
+  Addon updates alone do not stop or restart BDS.
+- SQLite stores pending work and status; a per-instance recovery journal protects
+  filesystem/database changes. Updates stage pack files, back up world/config
+  data, preserve stack order and enablement, and roll back on failure.
+- Related instance mutations share a reservation, preventing starts, deletion,
+  backups or manual addon changes from racing an update.
+- The WebUI shows download results, pending work, review holds and confirmed retries.
 
 ### Validation Rules
 
-- Existing downloaded addons can show Current, Update Available, or Unknown.
-- Provider failures do not break local addon management.
+- Stable available releases only; provider checksums are verified before applying.
+- Require matching provider Bedrock versions, supported pack types, preserved
+  identities, minimum engine versions, no version downgrade and exact dependencies.
+- Script API requirements and dependent stacks needing coordinated updates remain
+  manual review cases. Automated checks cannot guarantee gameplay compatibility.
+- Provider failures do not block adopting already-downloaded releases.
+- Interrupted prepared updates roll back; committed updates finish cleanup.
+- Failed updates require explicit retry, avoiding automatic retry loops.
+
+### Validation
+
+TypeScript/backend and Vite builds pass. Disposable `.runtime` smoke fixtures
+cover stable selection, shared downloads, independent schedules, running-instance
+deferral, pinning, checksum rejection, rollback, restart recovery, restored addon
+sources, concurrent mutations, provider outages and Bedrock/addon update ordering.
+Provider requests and archives are mocked; no real provider key or live instance
+is used. Desktop/mobile browser checks cover the library and instance status panels.
 
 ## Phase 6: Managed Maintenance Flow
 
@@ -1037,4 +1060,5 @@ Allow enable/disable while an instance is running by using the existing runtime 
 - Do not scrape CurseForge web pages for downloads.
 - Do not support arbitrary external download URLs from API input.
 - Do not silently edit addons while BDS is running.
-- Do not implement auto-updating addons until manual download/enable/disable is reliable.
+- Keep automatic addon application conservative; uncertain dependencies and
+  compatibility require manual review.

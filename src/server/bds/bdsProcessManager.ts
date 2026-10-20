@@ -1,6 +1,8 @@
 import { chmod, mkdir, stat } from "node:fs/promises";
 import { basename } from "node:path";
 import { spawn, ChildProcessWithoutNullStreams } from "node:child_process";
+import { assertChromaUpgradeNotInProgress } from "../updates/updateControl.js";
+import { assertNoAddonUpdateInProgress } from "../instances/addonUpdateControl.js";
 import type { BdsConsoleLine, BdsConsoleSnapshot } from "../../shared/types/index.js";
 import type { Instance } from "../../shared/types/index.js";
 import type { BdsRuntimeState } from "../../shared/types/bdsRuntime.js";
@@ -76,6 +78,8 @@ export class BdsProcessManager {
 
     await mkdir(`${instance.instancePath}/csm/logs`, { recursive: true });
 
+    assertChromaUpgradeNotInProgress();
+    assertNoAddonUpdateInProgress(instance);
     const child = spawn(`./${basename(executablePath)}`, {
       cwd: bdsDirectory,
       env: {
@@ -192,7 +196,7 @@ export class BdsProcessManager {
     }
 
     if (!child) {
-      return buildRuntimeState(instanceId, {
+      const stopped = buildRuntimeState(instanceId, {
         status: "stopped",
         desiredStatus: "stopped",
         healthStatus: "unknown",
@@ -204,6 +208,8 @@ export class BdsProcessManager {
         stoppedAt: new Date().toISOString(),
         message: "Instance is not running",
       });
+      this.setRuntimeState(instanceId, stopped);
+      return stopped;
     }
 
     const pid = child.pid;
@@ -293,13 +299,13 @@ export class BdsProcessManager {
       };
 
       stopTimer = setTimeout(() => {
-        if (!child.killed) {
+        if (child.exitCode === null && child.signalCode === null) {
           child.kill("SIGTERM");
         }
       }, STOP_TIMEOUT_MS);
 
       termTimer = setTimeout(() => {
-        if (!child.killed) {
+        if (child.exitCode === null && child.signalCode === null) {
           child.kill("SIGKILL");
         }
       }, STOP_TIMEOUT_MS + TERM_TIMEOUT_MS);

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { X } from "lucide-react";
+import ChromaUpdatesSection from "../components/ChromaUpdatesSection.js";
 import type { AppSettings, PkiStatusResponse, UpdateAppSettingsRequest } from "../../../shared/types/index.js";
 import {
   generatePkiCsr,
@@ -411,6 +412,8 @@ const SettingsPage = () => {
 
         </form>
       ) : null}
+
+      <ChromaUpdatesSection />
 
       <section className="settings-section settings-certificate-section">
         <header className="settings-section-header settings-certificate-header">

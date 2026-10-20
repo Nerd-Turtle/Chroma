@@ -1,3 +1,4 @@
+import { runInstanceMutation } from "./addonUpdateControl.js";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Database } from "better-sqlite3";
@@ -132,7 +133,7 @@ export async function getServerPropertiesEditorPayload(db: Database, instanceId:
   };
 }
 
-export async function saveServerPropertiesFromEditor(
+async function saveServerPropertiesFromEditorUnlocked(
   db: Database,
   instanceId: string,
   content: string,
@@ -175,4 +176,10 @@ export async function saveServerPropertiesFromEditor(
     filePath,
     restartRequired,
   };
+}
+
+export async function saveServerPropertiesFromEditor(db: Database, instanceId: string, content: string) {
+  const instance = getInstance(db, instanceId);
+  if (!instance) throw new Error("Instance not found");
+  return runInstanceMutation(instance, () => saveServerPropertiesFromEditorUnlocked(db, instanceId, content));
 }

@@ -1,3 +1,4 @@
+import { runInstanceMutation } from "../instances/addonUpdateControl.js";
 import { chmod, mkdir, stat } from "node:fs/promises";
 import { dirname, isAbsolute, join, normalize, sep } from "node:path";
 import yauzl from "yauzl";
@@ -62,13 +63,14 @@ function extractZipEntry(zipFile: yauzl.ZipFile, entry: yauzl.Entry, destination
         return;
       }
 
-      await mkdir(dirname(outputPath), { recursive: true });
-
-      const writeStream = await import("node:fs").then((fs) => fs.createWriteStream(outputPath));
-      readStream.pipe(writeStream);
-      readStream.on("end", () => resolve());
-      readStream.on("error", reject);
-      writeStream.on("error", reject);
+      try {
+        await mkdir(dirname(outputPath), { recursive: true });
+        const writeStream = await import("node:fs").then((fs) => fs.createWriteStream(outputPath));
+        readStream.pipe(writeStream);
+        writeStream.on("finish", () => resolve());
+        readStream.on("error", reject);
+        writeStream.on("error", reject);
+      } catch (writeError) { reject(writeError); }
     });
   });
 }
@@ -108,7 +110,7 @@ async function validateBdsInstall(instance: Instance): Promise<void> {
   await chmod(bdsPath, 0o755);
 }
 
-export async function installBdsForInstance(db: Database, instanceId: string): Promise<BdsInstall> {
+async function installBdsForInstanceUnlocked(db: Database, instanceId: string): Promise<BdsInstall> {
   const instance = getInstance(db, instanceId);
 
   if (!instance) {
@@ -196,4 +198,10 @@ export async function getBdsStatusForInstance(db: Database, instanceId: string):
     status: "not_installed",
     updatedAt: new Date().toISOString(),
   };
+}
+
+export async function installBdsForInstance(db: Database, instanceId: string): Promise<BdsInstall> {
+  const instance = getInstance(db, instanceId);
+  if (!instance) throw new Error("Instance not found");
+  return runInstanceMutation(instance, () => installBdsForInstanceUnlocked(db, instanceId));
 }

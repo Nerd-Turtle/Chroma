@@ -27,7 +27,6 @@ Agent assistance should be limited, instructional, and incremental. Do not make 
 - src/cli contains the Commander CLI.
 - src/shared contains shared TypeScript types, schemas, and constants.
 - install/ubuntu contains Ubuntu install assets.
-- install/docker is a placeholder only.
 - dev/scripts contains developer helper scripts.
 - dev/fixtures contains sample development files.
 - docs contains project documentation.

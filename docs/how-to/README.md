@@ -49,9 +49,22 @@ web server on ports 80 or 443 will conflict with the default installation.
 
 ## Install Chroma
 
+For the latest stable release, download and run the installer:
+
+```bash
+chroma_installer="$(mktemp)"
+curl --fail --show-error --silent --location \
+  https://github.com/Nerd-Turtle/Chroma/releases/latest/download/install-chroma.sh \
+  --output "${chroma_installer}" && sudo bash "${chroma_installer}"
+```
+
+The same script handles first installation, upgrades, and confirmed reinstalls.
+To review the script or install a specific version, use the steps below.
+
 Open [Chroma Releases](https://github.com/Nerd-Turtle/Chroma/releases) and choose
-a release with `install-chroma.sh`, the archive for your Ubuntu version, and its
-matching `.sha256` file. These instructions require published release assets;
+a release with `install-chroma.sh`, `chroma-ubuntu-amd64.tar.gz`, and its
+matching `.sha256` file. The same package installs on Ubuntu 24.04 and 26.04.
+These instructions require published release assets;
 if none are available, the public installation path is not ready yet.
 
 If curl is missing, install it first:
@@ -79,8 +92,8 @@ less /tmp/install-chroma.sh
 sudo bash /tmp/install-chroma.sh --version "${chroma_version}"
 ```
 
-The installer selects the matching Ubuntu archive, verifies its SHA-256
-checksum, creates the `chroma` service account, installs the application,
+The installer validates the supported Ubuntu version, downloads the shared archive,
+verifies its SHA-256 checksum, creates the `chroma` service account, installs the application,
 generates an initial self-signed certificate, and enables and starts
 `chroma.service`. It checks the service and local HTTPS health before reporting
 success. Missing prerequisite Ubuntu packages are installed automatically.
@@ -100,6 +113,12 @@ success. Missing prerequisite Ubuntu packages are installed automatically.
 The Dashboard shows CPU and memory usage, instance health, and player counts.
 Use **Instances** to create a server, **Addon Library** to browse and manage
 downloaded addons, and **Settings** for application preferences.
+
+Login cookies contain an opaque token generated from 32 cryptographically random
+bytes (256 bits). Chroma stores only its SHA-256 hash in SQLite and keeps account
+details on the server, following [OWASP's session token guidance](https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html#session-id-content-or-value).
+Upgrading from a version that issued short `sess_` tokens requires signing in
+again; those older cookies are no longer accepted.
 
 ## Create your first instance
 
@@ -144,7 +163,7 @@ a backup before significant world or configuration changes.
 
 ![Built-in server.properties editor](../images/instance-properties-editor.png)
 
-### Schedule Bedrock updates
+### Schedule Bedrock and addon updates
 
 From **Overview**, open **Edit overview**. Enable or disable automatic updating
 and set the daily or weekly schedule. Schedules use the timezone configured in
@@ -191,12 +210,41 @@ Disable an addon before unlinking it. The Downloaded library also shows linked
 instance counts and provides editing controls. An addon still in use cannot
 simply be deleted from the library.
 
-The **Downloaded** tab includes addon automatic update preferences and a
-schedule editor. These preferences are currently saved, but background addon
-update execution is not yet implemented. Bedrock's automatic updates are a
-separate, active feature. Keep a backup before changing an established world's
-addon stack; automatic sorting does not guarantee that every combination of
-addons is compatible.
+### Schedule addon updates
+
+In **Addon Library → Downloaded**, enable **Download updates automatically**
+and use the pencil icon to choose a daily or weekly library schedule. Chroma
+checks CurseForge and downloads the latest available stable releases once into
+the central library. **Check and download updates** runs that check manually.
+Both schedules use the timezone configured in Chroma Settings.
+
+Instances adopt downloaded releases on their own daily or weekly update
+schedule, configured under **Overview → Edit overview**. Enable automatic
+Bedrock and addon updates there, then use each library release's **Edit addon
+links → Linked Instances → Auto Update** preference to choose which addons
+may advance. Turn that preference off to pin an instance to its current addon
+version. Disabling the library schedule stops automatic downloads; instance
+schedules can still adopt releases already downloaded.
+
+Running or busy instances wait until stopped and idle. An addon update alone
+does not stop or start a Minecraft server. If a scheduled Bedrock update already
+stops the instance, eligible addons can update before its normal restart.
+Chroma creates an internal world/configuration backup, preserves addon
+enablement and stack order, and retains older library releases. Files still
+referenced by instances or pending updates cannot be deleted from the library.
+
+Review **Library updates** or an instance's **Scheduled addon updates** panel
+for pending work and errors. Unconfirmed Bedrock compatibility, changed pack
+identities, missing checksums or dependencies, provider dependency/conflict rules,
+and Script API dependencies are held for manual review. Coordinated updates across dependent addons require
+manual management. These checks do not guarantee gameplay compatibility.
+
+Failed updates restore the previous instance files and links where possible
+and require **Retry update → Confirm retry**. Pending work survives a Chroma
+restart. An interrupted update is recovered before instance starts are allowed;
+if recovery fails, correct the reported filesystem issue before retrying.
+Keep an export backup before manually changing an established world's addon
+stack; automatic sorting does not guarantee that every combination works.
 
 ## Back up and import an instance
 
@@ -250,7 +298,36 @@ Chroma application upgrades are separate from Bedrock and addon updates.
 Read the target release notes, save current instance exports, and back up
 application data and configuration before upgrading.
 
-Repeat the [installation download and run steps](#install-chroma) with the new
+Open **Settings → Chroma Updates** to manage application updates:
+
+- Automatic checks are enabled by default, every 24 hours. You can choose 6,
+  12, or 24 hours, or disable automatic checks and use **Check for updates**.
+- **Notify only** is the default. An available update appears in the navigation
+  bar and in Settings, with a link to the release notes.
+- **Install automatically** waits until all Minecraft instances are stopped and
+  their maintenance tasks have finished. A waiting update is reconsidered every
+  minute without repeatedly querying GitHub.
+- **Install update** provides a confirmation step for an immediate upgrade.
+  All Minecraft instances must be stopped first. Chroma blocks new instance
+  starts during the upgrade and reconnects the Settings page after restarting.
+
+Only stable releases tagged `vMAJOR.MINOR.PATCH` are considered. The shared Ubuntu
+AMD64 archive and its checksum must both be published. Prereleases and
+downgrades are excluded. Update checks do not require a GitHub API key.
+
+WebUI installation requires the updater service supplied by the Ubuntu installer.
+For an older installation, run the installer for the first release supporting
+WebUI upgrades once. Source checkouts can check for updates but do not install
+application releases from the UI.
+
+The upgrade runs in its own systemd service, so it can finish while Chroma is
+stopped. It verifies the release checksum, retains the previous application
+release, backs up the stopped application's database, and checks the service's
+HTTPS health after startup. A failed automatic upgrade requires a manual retry;
+Chroma does not repeatedly reinstall the same failed version or automatically
+roll back a database that may already have been migrated.
+
+For command-line upgrades, repeat the [installation download and run steps](#install-chroma) with the new
 release version and that release's installer. Plan downtime: stopping Chroma
 also stops its managed Bedrock processes. After the upgrade, sign in and check
 each instance before starting the servers you want to run.
@@ -303,7 +380,7 @@ in the [development notes](../../dev/README.md).
 
 | Symptom | Check |
 | --- | --- |
-| Installer download returns 404 | Confirm the release tag, installer asset, matching Ubuntu archive, and checksum have been published. |
+| Installer download returns 404 | Confirm the release tag, installer asset, shared Ubuntu AMD64 archive, and checksum have been published. |
 | Web interface is unreachable | Check service status, address, firewall, and whether another service occupies TCP 80 or 443. |
 | Browser certificate warning | The initial certificate is self-signed; check the hostname and install a certificate trusted by your clients. |
 | Instance will not start | Read Overview feedback and Logs; check installation state, UDP port conflicts, and addon errors. |

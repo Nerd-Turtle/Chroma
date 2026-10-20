@@ -3,7 +3,6 @@ import type { FastifyBaseLogger } from "fastify";
 import type {
   Instance,
   InstanceBdsCheckUpdatesResponse,
-  InstanceUpdateCheckWeekday,
 } from "../../shared/types/index.js";
 import { discoverBdsDownloadUrl } from "../bds/bdsDiscoveryService.js";
 import { getBdsStatusForInstance, installBdsForInstance } from "../bds/bdsInstallService.js";
@@ -13,101 +12,21 @@ import { listInstances } from "./instanceService.js";
 import { getInstance, saveInstance, updateInstanceAutoUpdateCheckAt, updateInstanceLastCheck } from "./instanceRepository.js";
 import { createInternalRevertBackup, restoreConfigFilesFromInternalBackup } from "./instanceBackupService.js";
 import { appendInstanceRuntimeEvent } from "./instanceRuntimeEventService.js";
+import type { AddonUpdateService } from "../addons/addonUpdateService.js";
+import { isUpdateScheduleDue } from "../utils/updateSchedule.js";
+import { runInstanceMutation } from "./addonUpdateControl.js";
 
 const AUTO_UPDATE_INTERVAL_MS = 60_000;
 const MAINTENANCE_WARNING_DELAY_MS = 10_000;
 let schedulerTimer: NodeJS.Timeout | null = null;
 const activeUpdates = new Set<string>();
 
-type TimezoneDateParts = {
-  year: number;
-  month: number;
-  day: number;
-  hour: number;
-  minute: number;
-  weekday: InstanceUpdateCheckWeekday;
-};
-
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function getTimezoneDateParts(date: Date, timeZone: string): TimezoneDateParts {
-  const formatter = new Intl.DateTimeFormat("en-CA", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    weekday: "long",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  });
-
-  const parts = formatter.formatToParts(date);
-  const byType = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-
-  return {
-    year: Number(byType.year),
-    month: Number(byType.month),
-    day: Number(byType.day),
-    hour: Number(byType.hour),
-    minute: Number(byType.minute),
-    weekday: String(byType.weekday).toLowerCase() as InstanceUpdateCheckWeekday,
-  };
-}
-
-function toUtcMidnightStamp(parts: Pick<TimezoneDateParts, "year" | "month" | "day">): number {
-  return Date.UTC(parts.year, parts.month - 1, parts.day);
-}
-
-function hasReachedScheduledTime(parts: TimezoneDateParts, scheduledTime: string): boolean {
-  const [scheduledHourText, scheduledMinuteText] = scheduledTime.split(":");
-  const scheduledHour = Number(scheduledHourText);
-  const scheduledMinute = Number(scheduledMinuteText);
-
-  if (Number.isNaN(scheduledHour) || Number.isNaN(scheduledMinute)) {
-    return false;
-  }
-
-  if (parts.hour > scheduledHour) {
-    return true;
-  }
-
-  if (parts.hour === scheduledHour && parts.minute >= scheduledMinute) {
-    return true;
-  }
-
-  return false;
-}
-
 function isInstanceDueForAutoUpdate(instance: Instance, timeZone: string, now: Date): boolean {
-  if (!instance.automaticUpdatesEnabled) {
-    return false;
-  }
-
-  const nowParts = getTimezoneDateParts(now, timeZone);
-  if (!hasReachedScheduledTime(nowParts, instance.updateCheckTime)) {
-    return false;
-  }
-
-  if (!instance.lastAutoUpdateCheckAt) {
-    return instance.updateCheckFrequency === "daily" || nowParts.weekday === instance.updateCheckWeekday;
-  }
-
-  const lastParts = getTimezoneDateParts(new Date(instance.lastAutoUpdateCheckAt), timeZone);
-  const nowDayStamp = toUtcMidnightStamp(nowParts);
-  const lastDayStamp = toUtcMidnightStamp(lastParts);
-
-  if (instance.updateCheckFrequency === "daily") {
-    return nowDayStamp > lastDayStamp;
-  }
-
-  if (nowParts.weekday !== instance.updateCheckWeekday) {
-    return false;
-  }
-
-  return nowDayStamp > lastDayStamp;
+  return instance.automaticUpdatesEnabled && isUpdateScheduleDue(instance, instance.lastAutoUpdateCheckAt, timeZone, now);
 }
 
 async function applyBdsUpdateForInstance(
@@ -115,7 +34,7 @@ async function applyBdsUpdateForInstance(
   logger: FastifyBaseLogger,
   instance: Instance,
   checkedAt: string,
-  options?: { updateLastCheckAt?: boolean },
+  options?: { updateLastCheckAt?: boolean; beforeRestart?: () => Promise<void> },
 ): Promise<import("../../shared/types/index.js").BdsInstall> {
   const shouldUpdateLastCheckAt = options?.updateLastCheckAt ?? true;
 
@@ -147,6 +66,7 @@ async function applyBdsUpdateForInstance(
     });
 
     if (!discovery.version || discovery.version === instance.bdsVersion) {
+      await options?.beforeRestart?.();
       logger.info({ instanceId: instance.id, version: discovery.version }, "No BDS update needed");
       updateInstanceLastCheck(
         db,
@@ -213,6 +133,10 @@ async function applyBdsUpdateForInstance(
       saveInstance(db, refreshedInstance);
     }
 
+    if (options?.beforeRestart) {
+      await setBdsMaintenanceState(db, instance.id, "idle");
+      await options.beforeRestart();
+    }
     if (wasRunning) {
       await setBdsMaintenanceState(db, instance.id, "update", "Restarting the instance after the BDS update.");
       await startBdsForInstance(db, instance.id);
@@ -265,8 +189,21 @@ async function applyBdsUpdateForInstance(
   }
 }
 
-async function performAutoUpdateForInstance(db: Database, logger: FastifyBaseLogger, instance: Instance, checkedAt: string): Promise<void> {
-  await applyBdsUpdateForInstance(db, logger, instance, checkedAt);
+async function performAutoUpdateForInstance(db: Database, logger: FastifyBaseLogger, instance: Instance, checkedAt: string, addons?: AddonUpdateService): Promise<void> {
+  // Queue from downloaded releases even if the Bedrock provider fails or has no update.
+  addons?.queueInstanceUpdates(instance);
+  try {
+    await runInstanceMutation(instance, () => applyBdsUpdateForInstance(db, logger, instance, checkedAt, {
+      beforeRestart: async () => {
+        const refreshed = getInstance(db, instance.id);
+        if (refreshed) addons?.queueInstanceUpdates(refreshed);
+        await addons?.processInstance(instance.id);
+      },
+    }));
+  } finally {
+    updateInstanceAutoUpdateCheckAt(db, instance.id, checkedAt);
+    await addons?.processInstance(instance.id);
+  }
 }
 
 export async function runManualUpdateForInstance(
@@ -280,9 +217,9 @@ export async function runManualUpdateForInstance(
     throw new Error("Instance not found");
   }
 
-  return await applyBdsUpdateForInstance(db, logger, instance, new Date().toISOString(), {
+  return await runInstanceMutation(instance, () => applyBdsUpdateForInstance(db, logger, instance, new Date().toISOString(), {
     updateLastCheckAt: false,
-  });
+  }));
 }
 
 export async function runManualCheckForInstance(
@@ -348,10 +285,11 @@ export async function runManualCheckForInstance(
   }
 }
 
-async function runAutoUpdateCycle(db: Database, logger: FastifyBaseLogger): Promise<void> {
+export async function runAutoUpdateCycle(db: Database, logger: FastifyBaseLogger, addons?: AddonUpdateService, now = new Date()): Promise<void> {
+  // Complete any due library download before choosing releases for due instances.
+  await addons?.runScheduledWork();
   const appSettings = getAppSettings(db);
   const timeZone = appSettings?.timezone ?? "UTC";
-  const now = new Date();
   const checkedAt = now.toISOString();
 
   for (const instance of listInstances(db)) {
@@ -360,24 +298,24 @@ async function runAutoUpdateCycle(db: Database, logger: FastifyBaseLogger): Prom
     }
 
     try {
-      await performAutoUpdateForInstance(db, logger, instance, checkedAt);
+      await performAutoUpdateForInstance(db, logger, instance, checkedAt, addons);
     } catch (error) {
       logger.error({ instanceId: instance.id, error }, "Automatic BDS update failed");
     }
   }
 }
 
-export function startInstanceAutoUpdateScheduler(db: Database, logger: FastifyBaseLogger): void {
+export function startInstanceAutoUpdateScheduler(db: Database, logger: FastifyBaseLogger, addons?: AddonUpdateService): void {
   if (schedulerTimer) {
     return;
   }
 
-  void runAutoUpdateCycle(db, logger).catch((error) => {
+  void runAutoUpdateCycle(db, logger, addons).catch((error) => {
     logger.error({ error }, "Automatic BDS update cycle failed");
   });
 
   schedulerTimer = setInterval(() => {
-    void runAutoUpdateCycle(db, logger).catch((error) => {
+    void runAutoUpdateCycle(db, logger, addons).catch((error) => {
       logger.error({ error }, "Automatic BDS update cycle failed");
     });
   }, AUTO_UPDATE_INTERVAL_MS);

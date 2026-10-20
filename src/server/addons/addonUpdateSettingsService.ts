@@ -47,6 +47,7 @@ export function getAddonUpdateSettings(db: Database): AddonUpdateSettings {
 }
 
 export function saveAddonUpdateSettings(db: Database, input: AddonUpdateSettings): AddonUpdateSettings {
+  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(input.updateCheckTime)) throw new Error("Choose an update time between 00:00 and 23:59.");
   const now = new Date().toISOString();
 
   upsertAppSetting(db, ADDON_UPDATE_CHECKS_ENABLED_KEY, input.automaticChecksEnabled ? "true" : "false", now);

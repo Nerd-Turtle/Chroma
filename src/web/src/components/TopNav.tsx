@@ -1,4 +1,5 @@
 import type { AuthUser } from "../../../shared/types/index.js";
+import ChromaUpdateNotice from "./ChromaUpdateNotice.js";
 
 type TopNavProps = {
   authenticated: boolean;
@@ -56,6 +57,7 @@ const TopNav = ({ authenticated, activePage, user, onLogout, onNavigate }: TopNa
 
       {authenticated && user ? (
         <div className="user-panel">
+          <ChromaUpdateNotice onOpen={() => onNavigate("settings")} />
           <span className="user-name">{user.username}</span>
           <button type="button" className="secondary-button light-secondary-button" onClick={onLogout}>
             Logout

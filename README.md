@@ -33,7 +33,9 @@ addon configuration, logs, and backups.
 - **See what is happening.** Follow instance health, installed versions, update
   status, and recent activity alongside host and instance resource usage.
 - **Choose when to update.** Check for Bedrock updates manually or configure
-  daily or weekly automatic updates for each instance.
+  daily or weekly automatic updates for each instance. Download stable addon
+  releases centrally, then let each instance adopt compatible versions on its
+  own schedule once stopped.
 
 ![Instance overview with version, health, update schedule, and recent activity](docs/images/instance-overview.png)
 
@@ -85,8 +87,21 @@ and dependency feedback to help manage the stack.
 ## Run Chroma on Ubuntu
 
 Chroma runs directly on Ubuntu 24.04 and 26.04 AMD64 hosts, using a systemd
-service and prebuilt application archives with a bundled Node.js runtime.
+service and one shared application package with a bundled Node.js runtime.
 Docker installation is not currently supported.
+
+Install the latest stable release with the installer:
+
+```bash
+chroma_installer="$(mktemp)"
+curl --fail --show-error --silent --location \
+  https://github.com/Nerd-Turtle/Chroma/releases/latest/download/install-chroma.sh \
+  --output "${chroma_installer}" && sudo bash "${chroma_installer}"
+```
+
+Under **Settings → Chroma Updates**, Chroma checks GitHub for stable releases.
+The default is to notify you. Automatic installation is optional and waits until
+every Minecraft instance is stopped.
 
 **[Read the installation and management guide →](docs/how-to/README.md)**
 

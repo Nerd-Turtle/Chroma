@@ -11,11 +11,17 @@ import { registerInstanceRoutes } from "./instances/instanceRoutes.js";
 import { registerPkiRoutes } from "./pki/pkiRoutes.js";
 import type { TlsCertificateMaterial } from "./pki/pkiService.js";
 import { registerSetupRoutes } from "./setup/setupRoutes.js";
+import { ChromaUpdateService } from "./updates/chromaUpdateService.js";
+import { registerChromaUpdateRoutes } from "./updates/chromaUpdateRoutes.js";
+import { AddonUpdateService } from "./addons/addonUpdateService.js";
+import { registerAddonUpdateRoutes } from "./addons/addonUpdateRoutes.js";
 
 export type BuildAppOptions = {
   https?: HttpsServerOptions;
   webDistDir?: string;
   onCertificateInstalled?: (material: TlsCertificateMaterial) => void | Promise<void>;
+  chromaUpdates?: ChromaUpdateService;
+  addonUpdates?: AddonUpdateService;
 };
 
 export function buildApp(db: Database, options: BuildAppOptions = {}) {
@@ -45,6 +51,15 @@ export function buildApp(db: Database, options: BuildAppOptions = {}) {
     ...(options.onCertificateInstalled ? { onCertificateInstalled: options.onCertificateInstalled } : {}),
   });
   registerInstanceRoutes(app, db);
+  const addonUpdates = options.addonUpdates ?? new AddonUpdateService(db);
+  registerAddonUpdateRoutes(app, db, addonUpdates);
+  app.addHook("onReady", async () => addonUpdates.recoverInterruptedUpdates(app.log));
+  app.addHook("onListen", async () => addonUpdates.startScheduler(app.log));
+  app.addHook("onClose", async () => addonUpdates.stopScheduler());
+  const updates = options.chromaUpdates ?? new ChromaUpdateService(db);
+  registerChromaUpdateRoutes(app, db, updates);
+  app.addHook("onListen", async () => updates.startScheduler(app.log));
+  app.addHook("onClose", async () => updates.stopScheduler());
 
   const webDistDir = options.webDistDir ? resolve(options.webDistDir) : undefined;
   if (webDistDir && existsSync(resolve(webDistDir, "index.html"))) {

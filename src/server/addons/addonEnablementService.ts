@@ -2,6 +2,8 @@ import { copyFile, mkdir, opendir, rm, stat } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import type { Database } from "better-sqlite3";
 import type { Instance, InstanceAddon, InstanceAddonPack } from "../../shared/types/index.js";
+import { runInstanceMutation } from "../instances/addonUpdateControl.js";
+import { resolveAddonSourcePath } from "./addonApplicationService.js";
 import { getBdsRuntimeState } from "../bds/bdsRuntimeService.js";
 import { createInternalRevertBackup } from "../instances/instanceBackupService.js";
 import { appendInstanceRuntimeEvent } from "../instances/instanceRuntimeEventService.js";
@@ -9,7 +11,6 @@ import { getInstance } from "../instances/instanceService.js";
 import { getRuntimePaths } from "../config/paths.js";
 import { getAddonDetailForInstance, listAddonsForInstance } from "./addonService.js";
 import { listInstanceAddonPacks, updateInstanceAddonEnablement, updateInstanceAddonSortOrders } from "./addonRepository.js";
-import { getAddonDownloadBasePath } from "./addonStoragePaths.js";
 import {
   addWorldPackReference,
   applyManagedPackOrder,
@@ -42,12 +43,6 @@ function assertChildPath(parentPath: string, childPath: string): void {
   if (relativePath === "" || relativePath.startsWith("..") || isAbsolute(relativePath)) {
     throw new Error("Resolved addon path is outside the expected instance directory.");
   }
-}
-
-function resolveAddonSourcePath(sourcePath: string): string {
-  const resolvedPath = resolveRuntimeManagedPath(sourcePath);
-  assertChildPath(getAddonDownloadBasePath(), resolvedPath);
-  return resolvedPath;
 }
 
 async function pathExists(path: string): Promise<boolean> {
@@ -194,7 +189,7 @@ function buildAutoSortedAddonIds(addons: InstanceAddon[]): string[] {
     .map((addon) => addon.id);
 }
 
-export async function enableAddonForInstance(db: Database, instanceId: string, addonId: string) {
+async function enableAddonForInstanceUnlocked(db: Database, instanceId: string, addonId: string) {
   const instance = getInstance(db, instanceId);
   if (!instance) {
     throw new Error("Instance not found");
@@ -233,7 +228,7 @@ export async function enableAddonForInstance(db: Database, instanceId: string, a
       throw new Error(`Imported pack folder already exists: ${importedPath}`);
     }
 
-    const sourcePath = resolveAddonSourcePath(pack.sourcePath);
+    const sourcePath = resolveAddonSourcePath(instance, pack.sourcePath);
     await copyDirectoryRecursive(sourcePath, importedPath);
 
     if (pack.packType === "behavior") {
@@ -269,7 +264,7 @@ export async function enableAddonForInstance(db: Database, instanceId: string, a
   return await getAddonDetailForInstance(db, instanceId, addonId);
 }
 
-export async function disableAddonForInstance(db: Database, instanceId: string, addonId: string) {
+async function disableAddonForInstanceUnlocked(db: Database, instanceId: string, addonId: string) {
   const instance = getInstance(db, instanceId);
   if (!instance) {
     throw new Error("Instance not found");
@@ -334,7 +329,7 @@ export async function disableAddonForInstance(db: Database, instanceId: string, 
   return await getAddonDetailForInstance(db, instanceId, addonId);
 }
 
-export async function reorderAddonsForInstance(
+async function reorderAddonsForInstanceUnlocked(
   db: Database,
   instanceId: string,
   addonIdsInOrder: string[],
@@ -379,4 +374,20 @@ export async function autoSortAddonsForInstance(db: Database, instanceId: string
   const addons = listAddonsForInstance(db, instanceId);
   const orderedAddonIds = buildAutoSortedAddonIds(addons);
   return reorderAddonsForInstance(db, instanceId, orderedAddonIds);
+}
+
+export async function enableAddonForInstance(db: Database, instanceId: string, addonId: string) {
+  const instance = getInstance(db, instanceId);
+  if (!instance) throw new Error("Instance not found");
+  return runInstanceMutation(instance, () => enableAddonForInstanceUnlocked(db, instanceId, addonId));
+}
+export async function disableAddonForInstance(db: Database, instanceId: string, addonId: string) {
+  const instance = getInstance(db, instanceId);
+  if (!instance) throw new Error("Instance not found");
+  return runInstanceMutation(instance, () => disableAddonForInstanceUnlocked(db, instanceId, addonId));
+}
+export async function reorderAddonsForInstance(db: Database, instanceId: string, addonIds: string[]) {
+  const instance = getInstance(db, instanceId);
+  if (!instance) throw new Error("Instance not found");
+  return runInstanceMutation(instance, () => reorderAddonsForInstanceUnlocked(db, instanceId, addonIds));
 }

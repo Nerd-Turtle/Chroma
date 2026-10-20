@@ -1,0 +1,15 @@
+[Unit]
+Description=Chroma upgrade control socket
+
+[Socket]
+ListenStream=/opt/chroma/update-state/control.sock
+SocketUser=root
+SocketGroup=chroma
+SocketMode=0660
+DirectoryMode=0755
+Accept=yes
+MaxConnections=2
+RemoveOnStop=yes
+
+[Install]
+WantedBy=sockets.target

@@ -21,7 +21,7 @@ export function registerAuthRoutes(app: FastifyInstance, db: Database): void {
 
     try {
       const result = await loginWithPassword(db, body.username.trim(), body.password);
-      reply.setCookie(SESSION_COOKIE_NAME, result.sessionId, {
+      reply.setCookie(SESSION_COOKIE_NAME, result.sessionToken, {
         httpOnly: true,
         sameSite: "lax",
         secure: process.env.NODE_ENV === "production",
@@ -41,9 +41,9 @@ export function registerAuthRoutes(app: FastifyInstance, db: Database): void {
   });
 
   app.post("/api/auth/logout", async (request, reply) => {
-    const sessionId = request.cookies[SESSION_COOKIE_NAME];
-    if (typeof sessionId === "string") {
-      logoutSession(db, sessionId);
+    const sessionToken = request.cookies[SESSION_COOKIE_NAME];
+    if (typeof sessionToken === "string") {
+      logoutSession(db, sessionToken);
     }
 
     reply.clearCookie(SESSION_COOKIE_NAME, { path: "/" });
@@ -51,12 +51,12 @@ export function registerAuthRoutes(app: FastifyInstance, db: Database): void {
   });
 
   app.get("/api/auth/session", async (request): Promise<AuthSessionResponse> => {
-    const sessionId = request.cookies[SESSION_COOKIE_NAME];
-    if (typeof sessionId !== "string") {
+    const sessionToken = request.cookies[SESSION_COOKIE_NAME];
+    if (typeof sessionToken !== "string") {
       return { authenticated: false };
     }
 
-    const user = getAuthenticatedUser(db, sessionId);
+    const user = getAuthenticatedUser(db, sessionToken);
     if (!user) {
       return { authenticated: false };
     }

@@ -1,3 +1,4 @@
+import { runInstanceMutation } from "./addonUpdateControl.js";
 import { createWriteStream } from "node:fs";
 import { copyFile, mkdir, opendir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, normalize, relative, resolve } from "node:path";
@@ -442,7 +443,7 @@ export async function createExportBackupZip(db: Database, instanceId: string): P
   return record;
 }
 
-export async function createManagedExportBackupZip(db: Database, instanceId: string): Promise<InstanceBackupRecord> {
+async function createManagedExportBackupZipUnlocked(db: Database, instanceId: string): Promise<InstanceBackupRecord> {
   const instance = getInstance(db, instanceId);
   if (!instance) {
     throw new Error("Instance not found");
@@ -707,4 +708,10 @@ export async function importInstanceBackupZip(db: Database, uploadedZipPath: str
   } finally {
     await rm(stagingPath, { recursive: true, force: true });
   }
+}
+
+export async function createManagedExportBackupZip(db: Database, instanceId: string): Promise<InstanceBackupRecord> {
+  const instance = getInstance(db, instanceId);
+  if (!instance) throw new Error("Instance not found");
+  return runInstanceMutation(instance, () => createManagedExportBackupZipUnlocked(db, instanceId));
 }

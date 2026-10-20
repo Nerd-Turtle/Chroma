@@ -5,7 +5,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 RELEASE_ROOT="${REPO_ROOT}/release"
 NODE_VERSION="${CHROMA_NODE_VERSION:-24.19.0}"
 NODE_PLATFORM="linux-x64"
-ARCHIVE_NAME=""
+ARCHIVE_NAME="chroma-ubuntu-amd64.tar.gz"
 PACKAGE_VERSION=""
 OUTPUT_DIRECTORY=""
 
@@ -13,8 +13,8 @@ usage() {
   cat <<'EOF'
 Usage: build-release.sh [options]
 
-Build a self-contained Chroma release on Ubuntu 24.04 or 26.04 AMD64.
-The archive targets the Ubuntu version of the build host.
+Build one self-contained Chroma archive for Ubuntu 24.04 and 26.04 AMD64.
+Native libraries must remain compatible with the Ubuntu 24.04 baseline.
 
 Options:
   --output DIRECTORY  Write release assets to DIRECTORY instead of release/<version>.
@@ -62,7 +62,7 @@ parse_arguments() {
 }
 
 require_tools() {
-  local required=(corepack curl sha256sum tar)
+  local required=(corepack curl readelf sha256sum tar)
   local tool
   for tool in "${required[@]}"; do
     command -v "${tool}" >/dev/null 2>&1 || fail "Required tool is missing: ${tool}"
@@ -76,7 +76,57 @@ check_platform() {
   [[ "${ID:-}" == "ubuntu" && ( "${VERSION_ID:-}" == "24.04" || "${VERSION_ID:-}" == "26.04" ) ]] \
     || fail "Build releases on Ubuntu 24.04 or 26.04."
   [[ "$(uname -m)" == "x86_64" ]] || fail "Build releases on AMD64."
-  ARCHIVE_NAME="chroma-ubuntu-${VERSION_ID}-amd64.tar.gz"
+}
+
+check_native_compatibility() {
+  log "Checking bundled binaries against the Ubuntu 24.04 library baseline"
+  node --input-type=module - "${bundle_dir}" <<'NODE'
+import { readdirSync } from "node:fs";
+import { join } from "node:path";
+import { execFileSync } from "node:child_process";
+
+// Baseline symbols exported by Ubuntu 24.04's libc6 and libstdc++6 packages.
+const limits = { GLIBC: "2.39", GLIBCXX: "3.4.33", CXXABI: "1.3.15" };
+const bundle = process.argv[2];
+let checked = 0;
+function check(binary) {
+  const output = execFileSync("readelf", ["--version-info", "--wide", binary], { encoding: "utf8", env: { ...process.env, LC_ALL: "C" } });
+  for (const [, symbol, family, version] of output.matchAll(/\bName: ((GLIBC|GLIBCXX|CXXABI)_([^\s]+))/g)) {
+    const required = version.split(".").map(Number);
+    const maximum = limits[family].split(".").map(Number);
+    let comparison = 0;
+    for (let index = 0; index < Math.max(required.length, maximum.length) && comparison === 0; index++) {
+      comparison = (required[index] ?? 0) - (maximum[index] ?? 0);
+    }
+    if (required.some((part) => !Number.isInteger(part)) || comparison > 0) {
+      throw new Error(`${binary} requires ${symbol}, beyond the Ubuntu 24.04 baseline. Build with clean dependencies on Ubuntu 24.04.`);
+    }
+  }
+  checked++;
+}
+function visit(directory) {
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) visit(path);
+    else if (entry.isFile() && /(?:\.node|\.so(?:\.[\d.]+)?)$/.test(entry.name)) check(path);
+  }
+}
+check(join(bundle, "node/bin/node"));
+visit(join(bundle, "app/node_modules"));
+console.log(`[chroma-release] ${checked} bundled binaries passed library version checks.`);
+NODE
+
+  log "Checking SQLite with the bundled Node.js runtime"
+  (
+    cd "${bundle_dir}/app"
+    "${bundle_dir}/node/bin/node" --input-type=module <<'NODE'
+import assert from "node:assert/strict";
+import Database from "better-sqlite3";
+const database = new Database(":memory:");
+try { assert.equal(database.prepare("SELECT 1 AS value").get().value, 1); }
+finally { database.close(); }
+NODE
+  )
 }
 
 download_node_runtime() {
@@ -130,11 +180,15 @@ main() {
   cp -a "${REPO_ROOT}/src/web/dist" "${bundle_dir}/app/web/"
   cp -a "${deploy_dir}/node_modules" "${bundle_dir}/app/node_modules"
   cp "${REPO_ROOT}/install/ubuntu/generate-self-signed-certificate.sh" "${bundle_dir}/install/generate-self-signed-certificate.sh"
+  cp "${REPO_ROOT}/install/ubuntu/install-chroma.sh" "${bundle_dir}/install/install-chroma.sh"
   cp "${REPO_ROOT}/install/ubuntu/chroma.service" "${bundle_dir}/systemd/chroma.service"
+  cp "${REPO_ROOT}/install/ubuntu/chroma-update.socket" "${bundle_dir}/systemd/chroma-update.socket"
+  cp "${REPO_ROOT}/install/ubuntu/chroma-update@.service" "${bundle_dir}/systemd/chroma-update@.service"
   printf '%s\n' "${PACKAGE_VERSION}" >"${bundle_dir}/release-version"
   git -C "${REPO_ROOT}" rev-parse HEAD >"${bundle_dir}/source-commit"
 
   download_node_runtime
+  check_native_compatibility
   chmod 0755 "${bundle_dir}/install/generate-self-signed-certificate.sh"
   find "${bundle_dir}" -type d -exec chmod 0755 {} +
   find "${bundle_dir}" -type f -exec chmod 0644 {} +

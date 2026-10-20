@@ -2,6 +2,19 @@ import type { Database } from "better-sqlite3";
 
 export function runMigrations(db: Database): void {
   db.exec(`
+    CREATE TABLE IF NOT EXISTS addon_instance_updates (
+      addon_id TEXT PRIMARY KEY,
+      instance_id TEXT NOT NULL,
+      target_file_id TEXT NOT NULL,
+      previous_file_id TEXT,
+      state TEXT NOT NULL,
+      message TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (addon_id) REFERENCES instance_addons(id) ON DELETE CASCADE,
+      FOREIGN KEY (instance_id) REFERENCES instances(id) ON DELETE CASCADE
+    );
+  `);
+  db.exec(`
     CREATE TABLE IF NOT EXISTS instances (
       id TEXT PRIMARY KEY,
       friendly_name TEXT NOT NULL,
@@ -355,7 +368,7 @@ export function runMigrations(db: Database): void {
       MIN(created_at),
       MAX(updated_at)
     FROM instance_addons
-    WHERE addon_file_id IS NULL
+    WHERE addon_file_id IS NULL AND library_sync_status != 'missing'
     GROUP BY provider, provider_project_id, provider_file_id;
 
     UPDATE instance_addons
@@ -366,7 +379,7 @@ export function runMigrations(db: Database): void {
         AND addon_files.provider_project_id = instance_addons.provider_project_id
         AND addon_files.provider_file_id = instance_addons.provider_file_id
     )
-    WHERE addon_file_id IS NULL;
+    WHERE addon_file_id IS NULL AND library_sync_status != 'missing';
 
     INSERT OR IGNORE INTO addon_file_packs (
       id,

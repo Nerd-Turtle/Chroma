@@ -1,8 +1,8 @@
 import type { Database } from "better-sqlite3";
 import type { AuthUser, UserRecord } from "../../shared/types/index.js";
-import { createId } from "../utils/createId.js";
 import { verifyPassword } from "./passwords.js";
 import { deleteSessionById, getSessionById, insertSession } from "./sessionRepository.js";
+import { createSessionToken, getSessionTokenHash } from "./sessionTokens.js";
 import { getUserById, getUserByUsername } from "./userRepository.js";
 
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -21,7 +21,7 @@ export async function loginWithPassword(
   db: Database,
   username: string,
   password: string,
-): Promise<{ user: AuthUser; sessionId: string; expiresAt: Date }> {
+): Promise<{ user: AuthUser; sessionToken: string; expiresAt: Date }> {
   const user = getUserByUsername(db, username);
   if (!user) {
     throw new Error("Invalid username or password");
@@ -34,10 +34,11 @@ export async function loginWithPassword(
 
   const now = new Date();
   const expiresAt = new Date(now.getTime() + SESSION_TTL_MS);
-  const sessionId = createId("sess");
+  const sessionToken = createSessionToken();
 
   insertSession(db, {
-    id: sessionId,
+    // The browser receives the token; SQLite keeps only its one-way verifier.
+    id: getSessionTokenHash(sessionToken)!,
     userId: user.id,
     createdAt: now.toISOString(),
     expiresAt: expiresAt.toISOString(),
@@ -45,23 +46,26 @@ export async function loginWithPassword(
 
   return {
     user: toAuthUser(user),
-    sessionId,
+    sessionToken,
     expiresAt,
   };
 }
 
-export function logoutSession(db: Database, sessionId: string): void {
-  deleteSessionById(db, sessionId);
+export function logoutSession(db: Database, sessionToken: string): void {
+  const sessionHash = getSessionTokenHash(sessionToken);
+  if (sessionHash) deleteSessionById(db, sessionHash);
 }
 
-export function getAuthenticatedUser(db: Database, sessionId: string): AuthUser | undefined {
-  const session = getSessionById(db, sessionId);
+export function getAuthenticatedUser(db: Database, sessionToken: string): AuthUser | undefined {
+  const sessionHash = getSessionTokenHash(sessionToken);
+  if (!sessionHash) return undefined;
+  const session = getSessionById(db, sessionHash);
   if (!session) {
     return undefined;
   }
 
   if (Date.parse(session.expiresAt) <= Date.now()) {
-    deleteSessionById(db, sessionId);
+    deleteSessionById(db, sessionHash);
     return undefined;
   }
 

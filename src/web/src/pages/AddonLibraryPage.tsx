@@ -25,6 +25,7 @@ import {
   updateAddonUpdateSettings,
 } from "../api/chromaApi.js";
 import { useNotificationDurationMs } from "../components/useNotificationDurationMs.js";
+import AddonUpdatesPanel from "../components/AddonUpdatesPanel.js";
 
 type CurseForgeSearchState = {
   results: CurseForgeAddonSearchResult[];
@@ -195,6 +196,15 @@ const AddonLibraryPage = ({
   useEffect(() => {
     void loadLibrary();
   }, []);
+
+  useEffect(() => {
+    if (activeTab !== "downloaded") return;
+    let active = true;
+    const timer = window.setInterval(() => {
+      void getAddonLibrary().then((result) => { if (active) setLibraryAddons(result.addons); }).catch(() => undefined);
+    }, 15_000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [activeTab]);
 
   useEffect(() => {
     async function loadProviderStatus() {
@@ -551,6 +561,17 @@ const AddonLibraryPage = ({
     }
   }
 
+  async function toggleAutomaticDownloads() {
+    if (!addonUpdateSettings) return;
+    setAddonUpdateSettingsSaving(true);
+    setError("");
+    try {
+      const result = await updateAddonUpdateSettings({ ...addonUpdateSettings, automaticChecksEnabled: !addonUpdateSettings.automaticChecksEnabled });
+      setAddonUpdateSettings(result.settings);
+    } catch (failure) { setError(failure instanceof Error ? failure.message : "Unable to save automatic downloads."); }
+    finally { setAddonUpdateSettingsSaving(false); }
+  }
+
   const totalSearchPages = search.pagination ? Math.max(1, Math.ceil(search.pagination.totalCount / search.pagination.pageSize)) : 1;
   const currentSearchPage = search.pagination?.page ?? 1;
   const canGoToPreviousSearchPage = canBrowse && !searching && currentSearchPage > 1;
@@ -606,23 +627,14 @@ const AddonLibraryPage = ({
 
         {showAddonUpdateControls ? (
           <div className="addon-library-tab-tools">
-            <span className="addon-library-tab-tools-label">Enable Auto-Updates</span>
+            <span className="addon-library-tab-tools-label">Download updates automatically</span>
             <button
               type="button"
               className={addonUpdateSettings.automaticChecksEnabled ? "toggle-switch active" : "toggle-switch"}
-              aria-label="Toggle automatic addon updates"
-              data-tooltip="Toggle automatic addon updates"
+              aria-label="Toggle automatic addon update downloads"
+              data-tooltip="Download stable addon updates on the library schedule"
               aria-pressed={addonUpdateSettings.automaticChecksEnabled}
-              onClick={() =>
-                setAddonUpdateSettings((current) =>
-                  current
-                    ? {
-                        ...current,
-                        automaticChecksEnabled: !current.automaticChecksEnabled,
-                      }
-                    : current,
-                )
-              }
+              onClick={() => void toggleAutomaticDownloads()}
               disabled={addonUpdateSettingsSaving}
             >
               <span className="toggle-switch-thumb" />
@@ -828,6 +840,7 @@ const AddonLibraryPage = ({
 
       {activeTab === "downloaded" ? (
         <section className="addon-library-section addon-library-section-downloaded">
+          <AddonUpdatesPanel onLibraryChanged={() => void loadLibrary()} />
           {libraryAddons.length === 0 ? (
             <p className="muted-copy">No addons have been downloaded yet.</p>
           ) : (
@@ -1008,6 +1021,8 @@ const AddonLibraryPage = ({
                                 type="button"
                                 className={linkedInstanceAutoUpdates[instance.instanceId] ?? true ? "toggle-switch active" : "toggle-switch"}
                                 aria-pressed={linkedInstanceAutoUpdates[instance.instanceId] ?? true}
+                                aria-label={`Automatically update ${addonEditorData.addon.name} on ${instance.friendlyName}`}
+                                data-tooltip="Adopt compatible library releases on this instance's update schedule"
                                 onClick={() => toggleLinkedInstanceAutoUpdate(instance.instanceId)}
                                 disabled={addonEditorSaving}
                               >

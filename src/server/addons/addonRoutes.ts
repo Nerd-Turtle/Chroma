@@ -67,7 +67,7 @@ export async function registerAddonRoutes(app: FastifyInstance, db: Database): P
   });
 
   app.put("/api/addons/settings", async (request, reply) => {
-    const body = request.body as {
+    const body = (request.body ?? {}) as {
       automaticChecksEnabled?: unknown;
       updateCheckFrequency?: unknown;
       updateCheckTime?: unknown;
@@ -82,7 +82,7 @@ export async function registerAddonRoutes(app: FastifyInstance, db: Database): P
       return reply.code(400).send({ error: "updateCheckFrequency must be daily or weekly" });
     }
 
-    if (typeof body.updateCheckTime !== "string" || !/^\d{2}:\d{2}$/.test(body.updateCheckTime)) {
+    if (typeof body.updateCheckTime !== "string" || !/^([01]\d|2[0-3]):[0-5]\d$/.test(body.updateCheckTime)) {
       return reply.code(400).send({ error: "updateCheckTime must be a valid HH:MM time" });
     }
 

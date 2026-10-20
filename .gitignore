@@ -5,6 +5,8 @@ release/
 .runtime/
 stage/
 .env
+.env.*
+!.env.example
 *.log
 
 # SQLite/runtime data

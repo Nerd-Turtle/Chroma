@@ -1,4 +1,6 @@
+import { runInstanceMutation } from "../instances/addonUpdateControl.js";
 import type { Database } from "better-sqlite3";
+import { assertChromaUpgradeNotInProgress } from "../updates/updateControl.js";
 import type { FastifyBaseLogger } from "fastify";
 import type { BdsConsoleSnapshot } from "../../shared/types/index.js";
 import type { BdsRuntimeState } from "../../shared/types/bdsRuntime.js";
@@ -221,11 +223,12 @@ export async function setBdsMaintenanceState(
   return runtimeState;
 }
 
-export async function startBdsForInstance(
+async function startBdsForInstanceUnlocked(
   db: Database,
   instanceId: string,
   options: StartBdsForInstanceOptions = {},
 ): Promise<BdsRuntimeState> {
+  assertChromaUpgradeNotInProgress();
   const instance = getInstance(db, instanceId);
 
   if (!instance) {
@@ -262,6 +265,7 @@ export async function startBdsForInstance(
   await updateInstanceStatus(db, instanceId, "starting");
 
   try {
+    assertChromaUpgradeNotInProgress();
     const runtimeState = await processManager.start(instance);
     const nextInstanceStatus = mapRuntimeStateToInstanceStatus(runtimeState);
     await updateInstanceStatus(db, instanceId, nextInstanceStatus);
@@ -490,4 +494,10 @@ export async function reconcileBdsRuntimeStates(db: Database, logger: FastifyBas
       "Reconciled BDS runtime state for instance",
     );
   }
+}
+
+export async function startBdsForInstance(db: Database, instanceId: string, options: StartBdsForInstanceOptions = {}): Promise<BdsRuntimeState> {
+  const instance = getInstance(db, instanceId);
+  if (!instance) throw new Error("Instance not found");
+  return runInstanceMutation(instance, () => startBdsForInstanceUnlocked(db, instanceId, options));
 }

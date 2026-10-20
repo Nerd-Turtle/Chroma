@@ -1,3 +1,4 @@
+import { assertNoAddonUpdateInProgress, runInstanceMutation } from "./addonUpdateControl.js";
 import type { Database } from "better-sqlite3";
 import type { Instance } from "../../shared/types/index.js";
 import { getRuntimePaths } from "../config/paths.js";
@@ -39,7 +40,7 @@ export function getInstance(db: Database, instanceId: string): Instance | undefi
   return getInstanceFromDb(db, instanceId);
 }
 
-export async function deleteInstance(db: Database, instanceId: string): Promise<void> {
+async function deleteInstanceUnlocked(db: Database, instanceId: string): Promise<void> {
   const instance = getInstanceFromDb(db, instanceId);
 
   if (!instance) {
@@ -65,6 +66,8 @@ export function updateInstance(
   if (!instance) {
     return Promise.resolve(undefined);
   }
+
+  assertNoAddonUpdateInProgress(instance);
 
   instance.friendlyName = input.friendlyName;
   instance.automaticUpdatesEnabled = input.automaticUpdatesEnabled;
@@ -158,4 +161,10 @@ export async function createInstance(
   });
 
   return instance;
+}
+
+export async function deleteInstance(db: Database, instanceId: string): Promise<void> {
+  const instance = getInstanceFromDb(db, instanceId);
+  if (!instance) throw new Error("Instance not found");
+  return runInstanceMutation(instance, () => deleteInstanceUnlocked(db, instanceId));
 }

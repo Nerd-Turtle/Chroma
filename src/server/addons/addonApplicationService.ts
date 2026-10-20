@@ -46,7 +46,7 @@ function assertChildPath(parentPath: string, childPath: string): void {
   }
 }
 
-function resolveAddonSourcePath(instance: Instance, sourcePath: string): string {
+export function resolveAddonSourcePath(instance: Instance, sourcePath: string): string {
   const resolvedPath = resolveRuntimeManagedPath(sourcePath);
   const libraryRoot = getAddonDownloadBasePath();
   const restoredAddonRoot = join(instance.instancePath, "csm", "restored-addons");

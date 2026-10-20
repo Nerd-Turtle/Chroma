@@ -1,4 +1,7 @@
 import type {
+  AddonUpdateSummary,
+  ChromaUpdateSettings,
+  ChromaUpdateStatus,
   AppSettingsResponse,
   AuthSessionResponse,
   AddonLibraryDownloadResponse,
@@ -135,6 +138,26 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
 export async function getAppSettings(): Promise<AppSettingsResponse> {
   const response = await fetch("/api/app/settings");
   return readJson<AppSettingsResponse>(response);
+}
+
+export async function getChromaUpdateStatus(): Promise<ChromaUpdateStatus> {
+  return readJson<ChromaUpdateStatus>(await fetch("/api/app/updates"));
+}
+
+export async function checkChromaUpdates(): Promise<ChromaUpdateStatus> {
+  return readJson<ChromaUpdateStatus>(await fetch("/api/app/updates/check", { method: "POST" }));
+}
+
+export async function saveChromaUpdateSettings(settings: ChromaUpdateSettings): Promise<ChromaUpdateStatus> {
+  return readJson<ChromaUpdateStatus>(await fetch("/api/app/updates/settings", {
+    method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(settings),
+  }));
+}
+
+export async function installChromaUpdate(version: string): Promise<ChromaUpdateStatus> {
+  return readJson<ChromaUpdateStatus>(await fetch("/api/app/updates/install", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ version, confirmed: true }),
+  }));
 }
 
 export async function updateAppSettings(payload: UpdateAppSettingsRequest): Promise<AppSettingsResponse> {
@@ -523,4 +546,17 @@ export async function checkInstanceBdsUpdates(instanceId: string): Promise<Insta
   });
 
   return readJson<InstanceBdsCheckUpdatesResponse>(response);
+}
+export async function getAddonUpdateSummary(): Promise<AddonUpdateSummary> {
+  return readJson<AddonUpdateSummary>(await fetch("/api/addons/updates"));
+}
+
+export async function checkAddonLibraryUpdates(): Promise<AddonUpdateSummary> {
+  return readJson<AddonUpdateSummary>(await fetch("/api/addons/updates/check", { method: "POST" }));
+}
+
+export async function retryInstanceAddonUpdate(instanceId: string, addonId: string): Promise<AddonUpdateSummary> {
+  return readJson<AddonUpdateSummary>(await fetch(`/api/instances/${encodeURIComponent(instanceId)}/addons/updates/${encodeURIComponent(addonId)}/retry`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ confirmed: true }),
+  }));
 }

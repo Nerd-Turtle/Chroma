@@ -3,7 +3,7 @@
 The installer is intended to download a prebuilt release archive; it must never clone the Chroma
 repository or compile application code on the target host. Chroma supports Ubuntu 24.04 and 26.04 AMD64.
 `install-chroma.sh --disable-version-check` exists only for deliberate compatibility testing on a
-different Ubuntu version, using the 26.04 archive.
+different Ubuntu version, using the same shared archive.
 
 Build local release assets with:
 
@@ -16,12 +16,52 @@ and installer script. The archive includes the compiled server, compiled web UI,
 dependencies, and the pinned Node.js runtime. The target host therefore does not need Node.js,
 pnpm, Git, or a compiler.
 
-Build once on Ubuntu 24.04 AMD64 and once on Ubuntu 26.04 AMD64 with clean dependencies on
-each host. Native dependencies such as SQLite are bundled from that host. The builder names
-the archives `chroma-ubuntu-24.04-amd64.tar.gz` and `chroma-ubuntu-26.04-amd64.tar.gz`;
-publish both archives and their checksums with the installer. The installer selects the archive
-matching the target host. Validate each archive using a matching cloud image with
-`dev/scripts/start-release-qemu-test.sh`.
+The archive also contains its own installer and the `chroma-update.socket` and
+`chroma-update@.service` units. Upload `chroma-ubuntu-amd64.tar.gz`, its matching
+`.sha256` file, and `install-chroma.sh` to a stable GitHub release tagged
+`v<package-version>`. WebUI updates use the latest stable release and require
+the same shared archive and checksum on both Ubuntu versions. Building assets does not publish
+them to GitHub.
+
+## WebUI updater
+
+The installer enables `chroma-update.socket`. Its root-owned Unix socket is
+`/opt/chroma/update-state/control.sock`, mode `0660`, accessible to the `chroma`
+group. The application remains unprivileged and cannot replace application files.
+It requests only a stable version number; it cannot supply commands, paths, or
+download URLs. The separate root service rechecks the stable GitHub release and
+calls the bundled installer with a fixed argument list. A file lock serializes
+WebUI workers, and a second installer lock also covers command-line installs.
+
+The updater writes root-owned status under `/opt/chroma/update-state/`. It does
+not source the application environment or read provider credentials. The service
+continues through Chroma's restart and reports success only after the installer's
+service and HTTPS checks pass. Jobs time out after 30 minutes; stale installation
+status is reported as failed after 35 minutes. There is no automatic database rollback.
+
+Inspect an upgrade with:
+
+```bash
+sudo systemctl status chroma-update.socket
+sudo journalctl -u 'chroma-update@*' --no-pager -n 100
+```
+
+Existing installations need to run the installer for an update-enabled release
+once to install the socket and worker. Developer testing must use `.runtime`
+with mocked GitHub responses and an installer substitute; it must not stop the
+host's Chroma service or install a real release.
+
+Build once to produce `chroma-ubuntu-amd64.tar.gz` for both Ubuntu 24.04 and
+26.04 AMD64. The builder requires `readelf` from `binutils` and checks the bundled
+Node.js runtime and native libraries against Ubuntu 24.04's glibc and C++ ABI
+baseline. It also checks SQLite using the bundled Node.js runtime. If a locally
+compiled dependency requires newer libraries, build with clean dependencies on
+Ubuntu 24.04 instead. This avoids packaging a binary that only works on 26.04.
+
+Publish the single archive, its `.sha256` file, and `install-chroma.sh` for each
+Chroma version. Before publishing, test the exact same archive on both Ubuntu
+versions using verified cloud images with `dev/scripts/start-release-qemu-test.sh`.
+Library checks do not replace installation and runtime testing on both systems.
 
 The v1 Ubuntu installer will run `generate-self-signed-certificate.sh` after it creates the
 `chroma` service account. The helper creates one long-lived private key and an initial self-signed

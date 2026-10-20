@@ -10,8 +10,8 @@ readonly CHROMA_LOG_DIR="/var/log/chroma"
 readonly CHROMA_RELEASES_DIR="${CHROMA_ROOT}/releases"
 readonly CHROMA_SERVICE_NAME="chroma.service"
 readonly CHROMA_REPOSITORY="Nerd-Turtle/Chroma"
-ARCHIVE_NAME="chroma-ubuntu-26.04-amd64.tar.gz"
-CHECKSUM_NAME="${ARCHIVE_NAME}.sha256"
+readonly ARCHIVE_NAME="chroma-ubuntu-amd64.tar.gz"
+readonly CHECKSUM_NAME="${ARCHIVE_NAME}.sha256"
 
 requested_version="latest"
 release_base_url=""
@@ -35,9 +35,9 @@ Usage: install-chroma.sh [options]
 Install a prebuilt Chroma release on Ubuntu AMD64.
 
 Options:
-  --version VERSION          Install a specific release version, for example 1.0.0.
+  --version VERSION          Install a specific version. Defaults to the latest stable release.
   --release-base-url URL     Override the release download base URL. Intended for local testing.
-  --disable-version-check    Test another Ubuntu version using the 26.04 release archive.
+  --disable-version-check    Allow deliberate compatibility testing on another Ubuntu version.
   --dry-run                  Validate prerequisites and show the planned install without changing the host.
   --yes                      Accept reinstalling an already-installed version without prompting.
   -h, --help                 Show this help text.
@@ -139,10 +139,7 @@ check_platform() {
   source /etc/os-release
   [[ "${ID:-}" == "ubuntu" ]] || fail "Chroma supports Ubuntu hosts only."
 
-  if [[ "${VERSION_ID:-}" == "24.04" || "${VERSION_ID:-}" == "26.04" ]]; then
-    ARCHIVE_NAME="chroma-ubuntu-${VERSION_ID}-amd64.tar.gz"
-    CHECKSUM_NAME="${ARCHIVE_NAME}.sha256"
-  else
+  if [[ "${VERSION_ID:-}" != "24.04" && "${VERSION_ID:-}" != "26.04" ]]; then
     if [[ "${disable_version_check}" == true ]]; then
       log "Warning: continuing on unsupported Ubuntu ${VERSION_ID:-unknown} because --disable-version-check was supplied."
     else
@@ -155,7 +152,7 @@ check_platform() {
 }
 
 install_prerequisites() {
-  local packages=(ca-certificates curl openssl tar gzip coreutils)
+  local packages=(ca-certificates curl openssl tar gzip coreutils util-linux libstdc++6)
   local missing_packages=()
   local package_name
 
@@ -295,6 +292,7 @@ create_service_account_and_paths() {
   fi
 
   run install -d -o root -g root -m 0755 "${CHROMA_ROOT}" "${CHROMA_RELEASES_DIR}"
+  run install -d -o root -g root -m 0755 "${CHROMA_ROOT}/update-state"
   run install -d -o "${CHROMA_USER}" -g "${CHROMA_GROUP}" -m 0750 "${CHROMA_CONFIG_DIR}" "${CHROMA_DATA_DIR}" "${CHROMA_LOG_DIR}"
 }
 
@@ -395,6 +393,13 @@ EOF
   fi
 
   install -o root -g root -m 0644 "${CHROMA_ROOT}/current/systemd/chroma.service" "/etc/systemd/system/${CHROMA_SERVICE_NAME}"
+  if [[ -f "${CHROMA_ROOT}/current/systemd/chroma-update.socket" &&
+        -f "${CHROMA_ROOT}/current/systemd/chroma-update@.service" &&
+        -f "${CHROMA_ROOT}/current/install/install-chroma.sh" &&
+        -f "${CHROMA_ROOT}/current/app/dist/server/updates/updateWorker.js" ]]; then
+    install -o root -g root -m 0644 "${CHROMA_ROOT}/current/systemd/chroma-update.socket" /etc/systemd/system/chroma-update.socket
+    install -o root -g root -m 0644 "${CHROMA_ROOT}/current/systemd/chroma-update@.service" /etc/systemd/system/chroma-update@.service
+  fi
   # Use env rather than shell assignment prefixes: CHROMA_USER is read-only in
   # this script, and Bash rejects an assignment to a read-only shell variable.
   env \
@@ -403,6 +408,9 @@ EOF
     "CHROMA_PKI_DIR=${CHROMA_CONFIG_DIR}/pki" \
     "${CHROMA_ROOT}/current/install/generate-self-signed-certificate.sh"
   systemctl daemon-reload
+  if [[ -f "${CHROMA_ROOT}/current/systemd/chroma-update.socket" ]]; then
+    systemctl enable --now chroma-update.socket
+  fi
   systemctl enable "${CHROMA_SERVICE_NAME}"
   systemctl start "${CHROMA_SERVICE_NAME}"
 }
@@ -466,6 +474,10 @@ main() {
     return
   fi
   install_prerequisites
+  # The WebUI helper and command-line installs share this lock.
+  install -d -o root -g root -m 0755 "${CHROMA_ROOT}" "${CHROMA_ROOT}/update-state"
+  exec {installer_lock_fd}>"${CHROMA_ROOT}/update-state/installer.lock"
+  flock --nonblock "${installer_lock_fd}" || fail "Another Chroma installer is already running."
   download_and_verify_release
   stage_release
   choose_install_action

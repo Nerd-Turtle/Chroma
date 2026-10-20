@@ -238,10 +238,61 @@ body.is-resizing {
   border-left: 1px solid rgba(255, 255, 255, 0.09);
 }
 
+.settings-updates-section,
 .settings-certificate-section {
   margin-top: 0.5rem;
   padding-top: 2rem;
   border-top: 1px solid rgba(255, 255, 255, 0.09);
+}
+
+.settings-update-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 3rem;
+  align-items: start;
+}
+
+.settings-update-grid > *,
+.settings-update-grid label,
+.settings-update-grid select {
+  min-width: 0;
+}
+
+.settings-update-grid .settings-update-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.settings-update-grid .settings-update-checkbox input {
+  width: auto;
+  flex: 0 0 auto;
+}
+
+.settings-updates-section .settings-certificate-header {
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.settings-update-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.settings-update-actions p {
+  flex-basis: 100%;
+}
+
+.chroma-update-notice {
+  color: #cbbaff;
+}
+
+@media (max-width: 760px) {
+  .settings-update-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1.5rem;
+  }
 }
 
 .settings-certificate-header {
@@ -3226,3 +3277,16 @@ h2 {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+.addon-update-panel {
+  padding: 1rem;
+  border: 1px solid var(--border-color, #343b4b);
+  border-radius: 0.65rem;
+  margin-bottom: 1rem;
+  min-width: 0;
+}
+.addon-update-panel-header { display: flex; justify-content: space-between; align-items: start; gap: 1rem; flex-wrap: wrap; }
+.addon-update-panel-header p { margin: 0.4rem 0; }
+.addon-update-status-list { padding-left: 1.25rem; margin-bottom: 0; }
+.addon-update-status-list li { margin-top: 0.8rem; overflow-wrap: anywhere; }
+.addon-update-status-list li > span { display: block; margin-top: 0.25rem; }
+.addon-update-status-list button { margin: 0.4rem 0.4rem 0 0; }

@@ -30,6 +30,8 @@ export type CurseForgeModFile = {
   gameId?: number;
   modId?: number;
   isAvailable?: boolean;
+  releaseType?: number;
+  hashes?: Array<{ value: string; algo: number }>;
   displayName: string;
   fileName: string;
   fileDate: string;
@@ -152,7 +154,7 @@ export class CurseForgeClient {
     const pageSize = 50;
     let index = 0;
 
-    while (true) {
+    while (index < 10_000) {
       const response = await this.get<CurseForgeApiResponse<CurseForgeModFile[]>>(`/v1/mods/${modId}/files`, {
         index: String(index),
         pageSize: String(pageSize),
@@ -197,6 +199,7 @@ export class CurseForgeClient {
     }
 
     const response = await fetch(url, {
+      signal: AbortSignal.timeout(15_000),
       headers: {
         Accept: "application/json",
         "x-api-key": this.apiKey,
