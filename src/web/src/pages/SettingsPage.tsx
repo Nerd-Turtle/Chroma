@@ -428,7 +428,7 @@ const SettingsPage = () => {
               type="button"
               className="secondary-button light-secondary-button"
               disabled={!canCreateCsr}
-              title={certificateIdentityBroken ? "The existing certificate's private key is unavailable" : undefined}
+              data-tooltip={certificateIdentityBroken ? "The existing certificate's private key is unavailable" : undefined}
               onClick={() => openCertificateDrawer("csr")}
             >
               Create CSR
@@ -437,7 +437,7 @@ const SettingsPage = () => {
               type="button"
               className="primary-button"
               disabled={!canInstallCertificate}
-              title={!pkiLoading && !pkiStatus?.privateKeyAvailable ? "Create a CSR to initialize the TLS private key first" : undefined}
+              data-tooltip={!pkiLoading && !pkiStatus?.privateKeyAvailable ? "Create a CSR to initialize the TLS private key first" : undefined}
               onClick={() => openCertificateDrawer("install")}
             >
               Install certificate
@@ -491,6 +491,7 @@ const SettingsPage = () => {
               <button
                 type="button"
                 className="settings-drawer-close"
+                data-tooltip="Close certificate drawer"
                 aria-label="Close certificate drawer"
                 disabled={pkiBusy}
                 onClick={closeCertificateDrawer}

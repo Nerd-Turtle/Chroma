@@ -1014,37 +1014,31 @@ h2 {
   justify-content: flex-start;
 }
 
-.addon-library-search-results .icon-action[data-tooltip] {
-  position: relative;
-}
-
-.addon-library-search-results .icon-action[data-tooltip]::after {
-  position: absolute;
-  top: calc(100% + 0.35rem);
-  right: 0;
-  z-index: 2;
+.tooltip {
+  position: fixed;
+  z-index: 100;
+  max-width: min(24rem, calc(100vw - 1rem));
   padding: 0.3rem 0.5rem;
   border: 1px solid rgba(125, 142, 170, 0.35);
   border-radius: 0.35rem;
   background: #172233;
   box-shadow: 0 0.35rem 0.8rem rgba(0, 0, 0, 0.25);
   color: #f6f7fb;
-  content: attr(data-tooltip);
   font-size: 0.72rem;
   line-height: 1.2;
-  white-space: nowrap;
-  opacity: 0;
+  overflow-wrap: anywhere;
   pointer-events: none;
-  transform: translateY(-0.15rem);
-  transition:
-    opacity 120ms ease,
-    transform 120ms ease;
+  animation: tooltip-fade-in 120ms ease 0ms both;
 }
 
-.addon-library-search-results .icon-action[data-tooltip]:hover::after,
-.addon-library-search-results .icon-action[data-tooltip]:focus-visible::after {
-  opacity: 1;
-  transform: translateY(0);
+@keyframes tooltip-fade-in {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
 }
 
 .addon-title-link {

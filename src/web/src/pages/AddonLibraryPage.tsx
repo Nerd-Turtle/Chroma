@@ -611,6 +611,7 @@ const AddonLibraryPage = ({
               type="button"
               className={addonUpdateSettings.automaticChecksEnabled ? "toggle-switch active" : "toggle-switch"}
               aria-label="Toggle automatic addon updates"
+              data-tooltip="Toggle automatic addon updates"
               aria-pressed={addonUpdateSettings.automaticChecksEnabled}
               onClick={() =>
                 setAddonUpdateSettings((current) =>
@@ -633,7 +634,7 @@ const AddonLibraryPage = ({
                 onClick={() => setAddonUpdateEditorOpen(true)}
                 disabled={addonUpdateSettingsSaving}
                 aria-label="Edit addon update schedule"
-                title="Edit addon update schedule"
+                data-tooltip="Edit addon update schedule"
               >
                 <Pencil aria-hidden="true" />
               </button>
@@ -694,7 +695,7 @@ const AddonLibraryPage = ({
                   disabled={!canGoToPreviousSearchPage}
                   onClick={() => void runSearch(currentSearchPage - 1)}
                   aria-label="Previous page"
-                  title="Previous page"
+                  data-tooltip="Previous page"
                 >
                   <ChevronLeft aria-hidden="true" size={18} strokeWidth={2.2} />
                 </button>
@@ -707,7 +708,7 @@ const AddonLibraryPage = ({
                   disabled={!canGoToNextSearchPage}
                   onClick={() => void runSearch(currentSearchPage + 1)}
                   aria-label="Next page"
-                  title="Next page"
+                  data-tooltip="Next page"
                 >
                   <ChevronRight aria-hidden="true" size={18} strokeWidth={2.2} />
                 </button>
@@ -783,7 +784,7 @@ const AddonLibraryPage = ({
                                 className="addon-author-link"
                                 onClick={() => void handleAuthorFilter(author)}
                                 disabled={!canBrowse || searching}
-                                title={`Show addons by ${author.name}`}
+                                data-tooltip={`Show addons by ${author.name}`}
                               >
                                 {author.name}
                               </button>
@@ -868,7 +869,7 @@ const AddonLibraryPage = ({
                         className="icon-action"
                         onClick={() => void openAddonEditor(addon)}
                         disabled={addonEditorSaving || deletingAddonId !== ""}
-                        title="Edit addon links"
+                        data-tooltip="Edit addon links"
                         aria-label={`Edit ${addon.name}`}
                       >
                         <Pencil aria-hidden="true" />
@@ -878,7 +879,7 @@ const AddonLibraryPage = ({
                         className="icon-action icon-action-danger"
                         onClick={() => void handleDeleteLibraryAddon(addon)}
                         disabled={deletingAddonId !== "" || addon.registeredInstanceCount > 0}
-                        title={addon.registeredInstanceCount > 0 ? "Remove this addon from instances before deleting it." : "Delete addon"}
+                        data-tooltip={addon.registeredInstanceCount > 0 ? "Remove this addon from instances before deleting it." : "Delete addon"}
                         aria-label={deletingAddonId === addon.id ? `Deleting ${addon.name}` : `Delete ${addon.name}`}
                       >
                         {deletingAddonId === addon.id ? (
@@ -960,7 +961,7 @@ const AddonLibraryPage = ({
                                   className={isEnabled ? "toggle-switch active" : "toggle-switch"}
                                   aria-pressed={isEnabled}
                                   aria-label={`${isEnabled ? "Disable" : "Enable"} ${addonEditorData.addon.name} on ${instance.friendlyName}`}
-                                  title={
+                                  data-tooltip={
                                     instance.status === "stopped"
                                       ? `${isEnabled ? "Disable" : "Enable"} addon`
                                       : "Stop this instance before changing addon enablement."

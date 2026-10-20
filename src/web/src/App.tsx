@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { AuthUser } from "../../shared/types/index.js";
 import { getSession, getSetupStatus, logout } from "./api/chromaApi.js";
 import TopNav from "./components/TopNav.js";
+import Tooltip from "./components/Tooltip.js";
 import AddonLibraryPage from "./pages/AddonLibraryPage.js";
 import DashboardPage from "./pages/DashboardPage.js";
 import InstancesPage from "./pages/InstancesPage.js";
@@ -146,6 +147,7 @@ const App = () => {
         {!loading && page === "addon-library" && user ? <AddonLibraryPage initialQuery={addonLibraryQuery} syncContext={addonLibrarySyncContext} /> : null}
         {!loading && page === "settings" && user ? <SettingsPage /> : null}
       </main>
+      <Tooltip />
     </div>
   );
 };

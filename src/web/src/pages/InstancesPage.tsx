@@ -1760,7 +1760,7 @@ const InstancesPage = () => {
                               ? "update-available"
                               : versionStatus.toLowerCase().replace(/ /g, "-")
                           )}`}
-                          title={installStatus !== "Current" && installStatus !== "Update available" ? `Install state: ${installStatus}` : undefined}
+                          data-tooltip={installStatus !== "Current" && installStatus !== "Update available" ? `Install state: ${installStatus}` : undefined}
                         >
                           {versionStatus}
                         </span>
@@ -1862,7 +1862,7 @@ const InstancesPage = () => {
                     className="icon-action icon-action-primary"
                     onClick={() => void handleRuntimeAction("start")}
                     disabled={!canStartSelectedInstance}
-                    title="Start"
+                    data-tooltip="Start"
                     aria-label="Start"
                   >
                     <ActionIcon active={actionInFlight === "start"}>
@@ -1874,7 +1874,7 @@ const InstancesPage = () => {
                     className="icon-action"
                     onClick={() => void handleRuntimeAction("stop")}
                     disabled={!canStopSelectedInstance}
-                    title="Stop"
+                    data-tooltip="Stop"
                     aria-label="Stop"
                   >
                     <ActionIcon active={actionInFlight === "stop"}>
@@ -1886,7 +1886,7 @@ const InstancesPage = () => {
                     className="icon-action"
                     onClick={() => void handleRuntimeAction("restart")}
                     disabled={!canRestartSelectedInstance}
-                    title="Restart"
+                    data-tooltip="Restart"
                     aria-label="Restart"
                   >
                     <ActionIcon active={actionInFlight === "restart"}>
@@ -1898,7 +1898,7 @@ const InstancesPage = () => {
                       type="button"
                       className="icon-action"
                       onClick={() => setEditingInstance(true)}
-                      title="Edit overview"
+                      data-tooltip="Edit overview"
                       aria-label="Edit overview"
                     >
                       <SquarePen aria-hidden="true" />
@@ -1909,7 +1909,7 @@ const InstancesPage = () => {
                       type="button"
                       className="icon-action"
                       onClick={() => void openServerPropertiesEditor()}
-                      title="Edit server.properties"
+                      data-tooltip="Edit server.properties"
                       aria-label="Edit server.properties"
                     >
                       <SquarePen aria-hidden="true" />
@@ -1920,7 +1920,7 @@ const InstancesPage = () => {
                       type="button"
                       className="icon-action"
                       onClick={() => void openAddonLinkEditor()}
-                      title="Edit linked addons"
+                      data-tooltip="Edit linked addons"
                       aria-label="Edit linked addons"
                     >
                       <SquarePen aria-hidden="true" />
@@ -1931,7 +1931,7 @@ const InstancesPage = () => {
                     className="icon-action"
                     onClick={() => void handleExportBackup()}
                     disabled={actionInFlight !== ""}
-                    title="Backup"
+                    data-tooltip="Backup"
                     aria-label="Backup"
                   >
                     <ActionIcon active={actionInFlight === "backup"}>
@@ -1944,7 +1944,7 @@ const InstancesPage = () => {
                       className="icon-action"
                       onClick={() => setUpdateMenuOpen((open) => !open)}
                       disabled={actionInFlight !== ""}
-                      title="Update options"
+                      data-tooltip="Update options"
                       aria-label="Update options"
                       aria-expanded={updateMenuOpen}
                       aria-haspopup="menu"
@@ -1983,7 +1983,7 @@ const InstancesPage = () => {
                       setConsoleOpen(true);
                       setConsoleError("");
                     }}
-                    title="Console"
+                    data-tooltip="Console"
                     aria-label="Console"
                   >
                     <Terminal aria-hidden="true" />
@@ -2391,7 +2391,7 @@ const InstancesPage = () => {
                                 void handleAddonDrop(addon.id);
                               }}
                             >
-                              <span className="instance-addon-order" role="cell">
+                              <span className="instance-addon-order" role="cell" data-tooltip="Drag to reorder addon">
                                 <GripVertical aria-hidden="true" />
                                 <strong>{index + 1}</strong>
                               </span>
@@ -2440,7 +2440,7 @@ const InstancesPage = () => {
                                   className={addon.status === "enabled" ? "toggle-switch active" : "toggle-switch"}
                                   aria-pressed={addon.status === "enabled"}
                                   aria-label={`${addon.status === "enabled" ? "Disable" : "Enable"} ${addon.name}`}
-                                  title={`${addon.status === "enabled" ? "Disable" : "Enable"} ${addon.name}`}
+                                  data-tooltip={`${addon.status === "enabled" ? "Disable" : "Enable"} ${addon.name}`}
                                   onClick={() => void handleAddonEnablement(addon, addon.status === "enabled" ? "disable" : "enable")}
                                   disabled={addon.status === "error" || workspaceData.runtime.isProcessActive || addonActionInFlight !== "" || addonOrderSaving}
                                 >
@@ -2451,7 +2451,7 @@ const InstancesPage = () => {
                                   className="icon-action icon-action-danger"
                                   onClick={() => void handleUnlinkAddon(addon)}
                                   disabled={addon.status === "enabled" || addonActionInFlight !== "" || addonOrderSaving}
-                                  title={
+                                  data-tooltip={
                                     addon.status === "enabled"
                                       ? "Disable this addon before unlinking it."
                                       : `Unlink ${addon.name}`
@@ -2571,7 +2571,7 @@ const InstancesPage = () => {
                                         className={checked ? "toggle-switch active" : "toggle-switch"}
                                         aria-pressed={checked}
                                         aria-label={`${checked ? "Unlink" : "Link"} ${addon.name}`}
-                                        title={isEnabled ? "Disable this addon before unlinking it." : `${checked ? "Unlink" : "Link"} addon`}
+                                        data-tooltip={isEnabled ? "Disable this addon before unlinking it." : `${checked ? "Unlink" : "Link"} addon`}
                                         disabled={addonLinkEditorSaving || isEnabled}
                                         onClick={() => toggleSelectedAddonFile(addon.id)}
                                       >
@@ -2640,7 +2640,7 @@ const InstancesPage = () => {
                       onClick={closeConsole}
                       disabled={consoleCommandSending}
                       aria-label="Close console"
-                      title="Close console"
+                      data-tooltip="Close console"
                     >
                       <X aria-hidden="true" />
                     </button>
@@ -2695,7 +2695,7 @@ const InstancesPage = () => {
                       className={`icon-action icon-action-danger${deleteConfirmOpen ? " icon-action-danger-active" : ""}`}
                       onClick={() => setDeleteConfirmOpen(true)}
                       disabled={savingInstance || deletingInstance}
-                      title="Delete instance"
+                      data-tooltip="Delete instance"
                       aria-label="Delete instance"
                     >
                       <Trash2 aria-hidden="true" />

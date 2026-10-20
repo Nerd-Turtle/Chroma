@@ -217,9 +217,9 @@ const DashboardPage = () => {
                     onFocus={() => setHoveredSegmentId(segment.instanceId)}
                     onBlur={() => setHoveredSegmentId("")}
                     tabIndex={0}
-                  >
-                    <title>{`${segment.friendlyName}: ${formatLabel(segment.healthCategory)}`}</title>
-                  </circle>
+                    aria-label={`${segment.friendlyName}: ${formatLabel(segment.healthCategory)}`}
+                    data-tooltip={`${segment.friendlyName}: ${formatLabel(segment.healthCategory)}`}
+                  />
                 ))}
               </svg>
               <div className="dashboard-health-ring-center">
@@ -323,7 +323,7 @@ const DashboardPage = () => {
                     <div className="dashboard-instance-metric" role="cell">
                       <span className="dashboard-instance-metric-label">Players</span>
                       <strong
-                        title={instance.playerCount === undefined ? "Live player count is unavailable for this instance." : undefined}
+                        data-tooltip={instance.playerCount === undefined ? "Live player count is unavailable for this instance." : undefined}
                       >
                         {instance.playerCount ?? "--"} / {instance.maxPlayers}
                       </strong>
