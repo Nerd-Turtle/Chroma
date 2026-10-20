@@ -163,6 +163,10 @@ inspect availability without installing an update.
 Chroma distinguishes three states: an addon can be **downloaded** to the
 library, **linked** to an instance, and **enabled** in that instance's world.
 
+In order for CurseForge Addon support to work, you must first request an
+API key, follow the instructions provided here: 
+https://support.curseforge.com/support/solutions/articles/9000208346-about-the-curseforge-api-and-how-to-apply-for-a-key#key
+
 ### Browse and download
 
 1. Enter your CurseForge API key in **Settings → API Settings** and save.
