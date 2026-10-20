@@ -5,7 +5,7 @@
 <h1 align="center">Chroma Server Manager</h1>
 
 <p align="center">
-  Deploy, manage, and mod multiple Minecraft Bedrock servers from one WebUI!
+  Deploy, manage, and mod multiple Minecraft Bedrock servers from one WebUI.
 </p>
 
 <p align="center">
@@ -17,10 +17,8 @@
 </p>
 
 Chroma is a self-hosted web application for managing Minecraft Bedrock Dedicated
-Server instances. Create a server, configure its world, choose its
-addons, and follow its activity from your browser.
-
-**Early development · Ubuntu 24.04 / 26.04 · AMD64 · MIT licensed**
+Servers that provides integrated CurseForge Addon support. Create an Instance, configure the server, choose its
+addons, and monitor its activity and performance from one location.
 
 ![Chroma dashboard showing host resource usage, instance health, and player counts](docs/images/dashboard.png)
 
@@ -92,14 +90,21 @@ Docker installation is not currently supported.
 
 **[Read the installation and management guide →](docs/how-to/README.md)**
 
-Chroma is in active early development. Use it on a trusted network, keep copies
+Chroma is still in early development. I'd advise you to keep copies
 of important worlds, and read the guide's deployment notes before installing.
 
 ## About the project
 
-Chroma is a personal learning project by Nerd Turtle, built with TypeScript,
-React, Fastify, and SQLite. Feedback, reproducible bug reports, and small,
-understandable contributions are welcome. See the
-[development notes](dev/README.md) to explore the project locally.
+As a gamer Dad who loves to play Minecraft with his kids, I found myself spending
+more time managing and troubleshooting our families Bedrock Dedicated Servers
+then actually playing on the with my kiddos.  I was inspired by the ease and
+mod support integration of Prism Launcher for Java Minecraft, so I attempted to
+build something similar for Bedrock.  Chroma was designed to provide a simple
+Dedicated Bedrock Server management UI, while also integrating and automating the
+installation of Addons.  Chroma is a vibecoded project using ChatGPT & Codex,
+built with TypeScript, React, Fastify, and SQLite.  Please feel free to roast,
+provide constructive feedback, or directly contribute to the project!
+
+See the [development notes](dev/README.md) to explore the project locally.
 
 Chroma Server Manager is licensed under the [MIT License](LICENSE).
