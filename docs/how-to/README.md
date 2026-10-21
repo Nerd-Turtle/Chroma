@@ -28,7 +28,6 @@ internet access for downloads, and storage for your worlds, addons, and backups.
 The release includes Node.js and application dependencies; the target host does
 not need Git, pnpm, or a compiler. Docker and other host platforms are unsupported.
 
-Chroma is in early development, with known security work still outstanding.
 Keep the management interface on a trusted network; do not expose it directly
 to the internet. Complete initial setup before giving other users network
 access: a fresh installation currently allows the first visitor to create the
@@ -49,17 +48,21 @@ web server on ports 80 or 443 will conflict with the default installation.
 
 ## Install Chroma
 
-For the latest stable release, download and run the installer:
+For a convenient install of the latest stable release:
 
 ```bash
-chroma_installer="$(mktemp)"
-curl --fail --show-error --silent --location \
-  https://github.com/Nerd-Turtle/Chroma/releases/latest/download/install-chroma.sh \
-  --output "${chroma_installer}" && sudo bash "${chroma_installer}"
+curl -fsSL https://github.com/Nerd-Turtle/Chroma/releases/latest/download/install-chroma.sh | sudo bash
 ```
 
+This shortcut executes downloaded code as root without a review step. Only use
+it if you trust the Chroma project and its release source. You can
+[read the installer source](../../install/ubuntu/install-chroma.sh) in your browser,
+or use the [download-and-review method](../../README.md#run-chroma-on-ubuntu) in
+the main README to inspect the exact downloaded file before executing it.
+
 The same script handles first installation, upgrades, and confirmed reinstalls.
-To review the script or install a specific version, use the steps below.
+To review the installer and pin the application to a specific release, use the
+steps below.
 
 Open [Chroma Releases](https://github.com/Nerd-Turtle/Chroma/releases) and choose
 a release with `install-chroma.sh`, `chroma-ubuntu-amd64.tar.gz`, and its
@@ -75,21 +78,27 @@ sudo apt-get install --yes curl ca-certificates
 ```
 
 Set `chroma_version` to the chosen release number without its leading `v`.
-`0.1.0` below is an example, not a guarantee that this release is published.
+`1.0.0` below is a fixed-version example; it does not track future releases.
 
 ```bash
-chroma_version='0.1.0'
+chroma_version='1.0.0'
+chroma_installer="$(mktemp)" &&
 curl --fail --show-error --location \
   "https://github.com/Nerd-Turtle/Chroma/releases/download/v${chroma_version}/install-chroma.sh" \
-  --output /tmp/install-chroma.sh
+  --output "${chroma_installer}"
 ```
 
-Continue only if the download succeeds. Review the downloaded script, then run
-it using the same version:
+Continue only if the download succeeds. Review the downloaded script:
 
 ```bash
-less /tmp/install-chroma.sh
-sudo bash /tmp/install-chroma.sh --version "${chroma_version}"
+less "${chroma_installer}"
+```
+
+If you are satisfied with it, run the same file in the same terminal, using the
+same version:
+
+```bash
+sudo bash "${chroma_installer}" --version "${chroma_version}"
 ```
 
 The installer validates the supported Ubuntu version, downloads the shared archive,

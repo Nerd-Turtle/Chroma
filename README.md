@@ -90,14 +90,46 @@ Chroma runs directly on Ubuntu 24.04 and 26.04 AMD64 hosts, using a systemd
 service and one shared application package with a bundled Node.js runtime.
 Docker installation is not currently supported.
 
-Install the latest stable release with the installer:
+**Convenient install — latest stable release:**
 
 ```bash
-chroma_installer="$(mktemp)"
-curl --fail --show-error --silent --location \
-  https://github.com/Nerd-Turtle/Chroma/releases/latest/download/install-chroma.sh \
-  --output "${chroma_installer}" && sudo bash "${chroma_installer}"
+curl -fsSL https://github.com/Nerd-Turtle/Chroma/releases/latest/download/install-chroma.sh | sudo bash
 ```
+
+> **Runs downloaded code as root.** This shortcut executes the installer as it
+> downloads, without a review step. Only use it if you trust the Chroma project
+> and its release source. [Read the installer source](install/ubuntu/install-chroma.sh),
+> or use the review-first method below to inspect the exact downloaded file
+> before running it.
+
+<details>
+<summary><strong>Download and review before installing</strong></summary>
+
+Download the latest release's installer to a temporary file and open it for review:
+
+The first line defines `chroma_installer`. Leave `${chroma_installer}` as written;
+the shell replaces it with the temporary file's path.
+
+```bash
+chroma_installer="$(mktemp)" &&
+curl -fsSL https://github.com/Nerd-Turtle/Chroma/releases/latest/download/install-chroma.sh \
+  --output "${chroma_installer}" &&
+less "${chroma_installer}"
+```
+
+If the download succeeded and you are satisfied with the script, run that same
+file in the same terminal:
+
+```bash
+sudo bash "${chroma_installer}"
+```
+
+The installer downloads the application package and installs system packages and
+services, so reviewing the script still requires trusting those release contents.
+See the [installation guide](docs/how-to/README.md#install-chroma) to select a
+specific release instead of the latest stable version.
+
+</details>
 
 Under **Settings → Chroma Updates**, Chroma checks GitHub for stable releases.
 The default is to notify you. Automatic installation is optional and waits until
@@ -105,8 +137,8 @@ every Minecraft instance is stopped.
 
 **[Read the installation and management guide →](docs/how-to/README.md)**
 
-Chroma is still in early development. I'd advise you to keep copies
-of important worlds, and read the guide's deployment notes before installing.
+Keep copies of important worlds, and read the guide's deployment notes before
+installing.
 
 ## About the project
 
