@@ -1,6 +1,6 @@
 {
   "name": "chroma",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Chroma Server Manager is a Minecraft Bedrock Dedicated Server and addon manager.",
   "private": true,
   "type": "module",
