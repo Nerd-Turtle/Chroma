@@ -2,7 +2,7 @@ import { isTimeZone } from "../../../shared/validation.js";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { X } from "lucide-react";
 import ChromaUpdatesSection from "../components/ChromaUpdatesSection.js";
-import type { AppSettings, PkiStatusResponse, UpdateAppSettingsRequest } from "../../../shared/types/index.js";
+import type { AppSettings, ChromaUpdateStatus, PkiStatusResponse, UpdateAppSettingsRequest } from "../../../shared/types/index.js";
 import {
   generatePkiCsr,
   getAppSettings,
@@ -20,7 +20,9 @@ function getTimezoneOptions(): string[] {
   return ["UTC", ...Intl.supportedValuesOf("timeZone")];
 }
 
-const SettingsPage = () => {
+type SettingsPageProps = { onInstallUpgrade: (status: ChromaUpdateStatus) => void; onUpgradeDetected: (status: ChromaUpdateStatus) => void };
+
+const SettingsPage = ({ onInstallUpgrade, onUpgradeDetected }: SettingsPageProps) => {
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [timezone, setTimezone] = useState("");
   const [timezoneQuery, setTimezoneQuery] = useState("");
@@ -440,7 +442,7 @@ const SettingsPage = () => {
         </form>
       ) : null}
 
-      <ChromaUpdatesSection />
+      <ChromaUpdatesSection onInstall={onInstallUpgrade} onUpgradeDetected={onUpgradeDetected} />
 
       <section className="settings-section settings-certificate-section">
         <header className="settings-section-header settings-certificate-header">

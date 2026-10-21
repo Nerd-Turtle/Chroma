@@ -1,11 +1,13 @@
 import { useEffect, useState, type FormEvent } from "react";
 import type { ChromaUpdateSettings, ChromaUpdateStatus } from "../../../shared/types/index.js";
-import { checkChromaUpdates, getChromaUpdateStatus, installChromaUpdate, saveChromaUpdateSettings } from "../api/chromaApi.js";
+import { checkChromaUpdates, getChromaUpdateStatus, saveChromaUpdateSettings } from "../api/chromaApi.js";
 
-const ChromaUpdatesSection = () => {
+type Props = { onInstall: (status: ChromaUpdateStatus) => void; onUpgradeDetected: (status: ChromaUpdateStatus) => void };
+
+const ChromaUpdatesSection = ({ onInstall, onUpgradeDetected }: Props) => {
   const [status, setStatus] = useState<ChromaUpdateStatus | null>(null);
   const [preferences, setPreferences] = useState<ChromaUpdateSettings | null>(null);
-  const [action, setAction] = useState<"save" | "check" | "install" | null>(null);
+  const [action, setAction] = useState<"save" | "check" | null>(null);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [disconnected, setDisconnected] = useState(false);
@@ -18,6 +20,7 @@ const ChromaUpdatesSection = () => {
         const result = await getChromaUpdateStatus();
         if (disposed) return;
         setStatus(result);
+        onUpgradeDetected(result);
         setPreferences((current) => current ?? result.settings);
         setError((current) => current === "Unable to load Chroma updates." ? "" : current);
         setDisconnected(false);
@@ -30,20 +33,20 @@ const ChromaUpdatesSection = () => {
     void refresh();
     const timer = window.setInterval(() => { void refresh(); }, 5_000);
     return () => { disposed = true; window.clearInterval(timer); };
-  }, []);
+  }, [onUpgradeDetected]);
 
-  async function perform(nextAction: "save" | "check" | "install", request: () => Promise<ChromaUpdateStatus>) {
+  async function perform(nextAction: "save" | "check", request: () => Promise<ChromaUpdateStatus>) {
     setAction(nextAction);
     setError("");
     setSuccess("");
     try {
       const result = await request();
       setStatus(result);
+      onUpgradeDetected(result);
       if (nextAction === "save") {
         setPreferences(result.settings);
         setSuccess("Chroma update settings saved.");
       }
-      if (nextAction === "install") setConfirmInstall(false);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Unable to update Chroma.");
     } finally { setAction(null); }
@@ -122,7 +125,7 @@ const ChromaUpdatesSection = () => {
                   <>
                     <p>Install Chroma {status.latestRelease?.version} now? Chroma will restart. The installer backs up the database and retains the previous application release.</p>
                     <button type="button" className="primary-button" disabled={!canInstall}
-                      onClick={() => void perform("install", () => installChromaUpdate(status.latestRelease!.version))}>Confirm upgrade</button>
+                      onClick={() => onInstall(status)}>Confirm upgrade</button>
                     <button type="button" className="secondary-button" disabled={action !== null} onClick={() => setConfirmInstall(false)}>Cancel</button>
                   </>
                 ) : <button type="button" className="primary-button" disabled={!canInstall} onClick={() => setConfirmInstall(true)}>Install update</button>}

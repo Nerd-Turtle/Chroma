@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from "react";
 import type { AuthUser } from "../../shared/types/index.js";
 import { ApiRequestError, getSession, getSetupStatus, logout, SESSION_EXPIRED_EVENT } from "./api/chromaApi.js";
 import { useSessionActivity } from "./components/useSessionActivity.js";
+import { useChromaUpgrade } from "./components/useChromaUpgrade.js";
+import ChromaUpgradeScreen from "./components/ChromaUpgradeScreen.js";
 import TopNav from "./components/TopNav.js";
 import Tooltip from "./components/Tooltip.js";
 import AddonLibraryPage from "./pages/AddonLibraryPage.js";
@@ -57,6 +59,8 @@ const App = () => {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [addonLibraryQuery, setAddonLibraryQuery] = useState("");
   const [addonLibrarySyncContext, setAddonLibrarySyncContext] = useState<AddonLibrarySyncContext>(null);
+  const { attempt, requestPending, requestError, beginUpgrade, observeUpgrade, updateAttempt, clearUpgrade } = useChromaUpgrade();
+  const recoveringUpgrade = attempt !== null;
 
   const showLogin = useCallback(() => {
     setUser(null);
@@ -76,6 +80,7 @@ const App = () => {
   }, [showLogin]);
 
   useEffect(() => {
+    if (recoveringUpgrade) return;
     const controller = new AbortController();
     let ignore = false;
     setLoading(true);
@@ -108,9 +113,9 @@ const App = () => {
         : error instanceof Error ? error.message : "Unable to connect to Chroma.");
     });
     return () => { ignore = true; controller.abort(); };
-  }, [showLogin, initializationAttempt]);
+  }, [showLogin, initializationAttempt, recoveringUpgrade]);
 
-  useSessionActivity(user !== null, showLogin);
+  useSessionActivity(user !== null && !recoveringUpgrade, showLogin);
 
   useEffect(() => {
     function handleHashChange() {
@@ -137,6 +142,13 @@ const App = () => {
 
   const isAuthenticated = user !== null && page !== "setup" && page !== "login";
 
+  if (attempt) return <ChromaUpgradeScreen attempt={attempt} requestPending={requestPending} requestError={requestError}
+    updateAttempt={updateAttempt} onFinish={() => {
+      setLoading(true);
+      syncWorkspaceHash("settings");
+      clearUpgrade();
+    }} />;
+
   return (
     <div className="app-shell">
       <TopNav
@@ -144,6 +156,7 @@ const App = () => {
         activePage={page}
         user={user}
         onLogout={() => void handleLogout()}
+        onUpgradeDetected={observeUpgrade}
         onNavigate={(nextPage) => {
           setPage(nextPage);
           setAddonLibraryQuery("");
@@ -176,7 +189,7 @@ const App = () => {
         {!loading && page === "dashboard" && user ? <DashboardPage /> : null}
         {!loading && page === "instances" && user ? <InstancesPage /> : null}
         {!loading && page === "addon-library" && user ? <AddonLibraryPage initialQuery={addonLibraryQuery} syncContext={addonLibrarySyncContext} /> : null}
-        {!loading && page === "settings" && user ? <SettingsPage /> : null}
+        {!loading && page === "settings" && user ? <SettingsPage onInstallUpgrade={beginUpgrade} onUpgradeDetected={observeUpgrade} /> : null}
       </main>
       <Tooltip />
     </div>

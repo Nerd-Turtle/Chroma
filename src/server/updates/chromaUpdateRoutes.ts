@@ -4,6 +4,8 @@ import { requireAuthenticated } from "../auth/authGuard.js";
 import type { ChromaUpdateService } from "./chromaUpdateService.js";
 
 export function registerChromaUpdateRoutes(app: FastifyInstance, db: Database, service: ChromaUpdateService): void {
+  // Recovery must work after session expiry; expose no jobs, settings, or runtime paths.
+  app.get("/api/app/readiness", async () => service.getReadiness());
   const preHandler = [requireAuthenticated(db), async (request: FastifyRequest, reply: FastifyReply) => {
     if (request.authUser?.role !== "admin") return reply.code(403).send({ error: "Administrator access is required for Chroma updates." });
   }];

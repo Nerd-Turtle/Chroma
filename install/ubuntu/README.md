@@ -39,6 +39,15 @@ continues through Chroma's restart and reports success only after the installer'
 service and HTTPS checks pass. Jobs time out after 30 minutes; stale installation
 status is reported as failed after 35 minutes. There is no automatic database rollback.
 
+The 0.3.0 WebUI keeps upgrade recovery above the authenticated workspace and
+persists only a version/time marker in the tab's session storage. A public
+`GET /api/app/readiness` returns only `{ status, version }` with
+`Cache-Control: no-store`; detailed update status remains administrator-only. Recovery reloads
+the interface once when the target version becomes available, then verifies the
+authenticated worker result and installed version. HTML responses use
+`Cache-Control: no-cache` so the reload discovers the new compiled asset names.
+Reconnection, refresh, and **Retry connection** never submit another install.
+
 Inspect an upgrade with:
 
 ```bash

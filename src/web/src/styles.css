@@ -43,6 +43,50 @@ body.is-resizing {
   overflow: hidden;
 }
 
+.upgrade-screen {
+  height: 100dvh;
+  overflow-y: auto;
+  display: grid;
+  justify-items: center;
+  align-items: start;
+  padding: clamp(1rem, 6vh, 4rem) 1rem;
+}
+
+.upgrade-card {
+  width: min(100%, 42rem);
+  padding: clamp(1.25rem, 5vw, 3rem);
+  background: rgba(12, 16, 24, 0.95);
+  border: 1px solid var(--chrome-divider-strong);
+  border-radius: 1.5rem;
+  box-shadow: 0 24px 90px rgba(0, 0, 0, 0.4);
+  text-align: center;
+}
+
+.upgrade-brand { display: flex; align-items: center; justify-content: center; gap: 0.7rem; color: #a9b3c4; }
+.upgrade-brand img { width: 2rem; height: 2rem; }
+.upgrade-symbol { margin: 2rem auto 1.5rem; color: #9d85ff; }
+.upgrade-symbol svg { width: 3rem; height: 3rem; }
+.upgrade-symbol-succeeded { color: #7fe3b0; }
+.upgrade-symbol-failed, .upgrade-symbol-unknown { color: #ffca6d; }
+.upgrade-eyebrow { font-size: 0.75rem; letter-spacing: 0.18em; color: #a9b3c4; }
+.upgrade-card h1 { font-size: clamp(1.5rem, 5vw, 2rem); margin: 0.75rem 0; outline: none; overflow-wrap: anywhere; }
+.upgrade-version { color: #c4b6ff; font-variant-numeric: tabular-nums; }
+.upgrade-status { min-height: 3rem; line-height: 1.6; }
+.upgrade-progress { height: 0.35rem; margin: 1.5rem 0; border-radius: 1rem; overflow: hidden; background: #232938; }
+.upgrade-progress span { display: block; width: 35%; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #74d8ff, #9d85ff); animation: upgrade-progress 1.8s ease-in-out infinite; }
+.upgrade-timing { display: flex; flex-wrap: wrap; justify-content: center; gap: 1rem 3rem; margin: 1.5rem 0; font-size: 0.85rem; }
+.upgrade-timing dt { color: #a9b3c4; margin-bottom: 0.4rem; }
+.upgrade-timing dd { margin: 0; font-variant-numeric: tabular-nums; }
+.upgrade-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.75rem; margin-top: 1.5rem; }
+.upgrade-card .setup-panel { text-align: left; margin-top: 1.5rem; padding: 1.25rem; width: 100%; }
+.upgrade-card .setup-panel h1 { font-size: 1.25rem; }
+.upgrade-spin { animation: upgrade-spin 2s linear infinite; }
+@keyframes upgrade-spin { to { transform: rotate(360deg); } }
+@keyframes upgrade-progress { from { transform: translateX(-100%); } to { transform: translateX(390%); } }
+@media (prefers-reduced-motion: reduce) {
+  .upgrade-spin, .upgrade-progress span { animation: none; }
+}
+
 .top-nav {
   display: grid;
   grid-template-columns: auto 1fr auto;

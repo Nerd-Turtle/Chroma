@@ -1,4 +1,4 @@
-import type { AuthUser } from "../../../shared/types/index.js";
+import type { AuthUser, ChromaUpdateStatus } from "../../../shared/types/index.js";
 import ChromaUpdateNotice from "./ChromaUpdateNotice.js";
 
 type TopNavProps = {
@@ -6,10 +6,11 @@ type TopNavProps = {
   activePage: "setup" | "login" | "dashboard" | "instances" | "addon-library" | "settings";
   user: AuthUser | null;
   onLogout: () => void;
+  onUpgradeDetected: (status: ChromaUpdateStatus) => void;
   onNavigate: (page: "dashboard" | "instances" | "addon-library" | "settings") => void;
 };
 
-const TopNav = ({ authenticated, activePage, user, onLogout, onNavigate }: TopNavProps) => {
+const TopNav = ({ authenticated, activePage, user, onLogout, onNavigate, onUpgradeDetected }: TopNavProps) => {
   return (
     <header className="top-nav">
       <div className="brand-lockup">
@@ -57,7 +58,7 @@ const TopNav = ({ authenticated, activePage, user, onLogout, onNavigate }: TopNa
 
       {authenticated && user ? (
         <div className="user-panel">
-          <ChromaUpdateNotice onOpen={() => onNavigate("settings")} />
+          <ChromaUpdateNotice onOpen={() => onNavigate("settings")} onUpgradeDetected={onUpgradeDetected} />
           <span className="user-name">{user.username}</span>
           <button type="button" className="secondary-button light-secondary-button" onClick={onLogout}>
             Logout

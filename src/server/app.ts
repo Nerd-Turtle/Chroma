@@ -72,6 +72,10 @@ export function buildApp(db: Database, options: BuildAppOptions = {}) {
     void app.register(fastifyStatic, {
       root: webDistDir,
       wildcard: false,
+      // A recovery reload must discover the new hashed JavaScript/CSS asset names.
+      setHeaders(response, filePath) {
+        if (filePath.endsWith("/index.html")) response.header("Cache-Control", "no-cache");
+      },
     });
 
     app.setNotFoundHandler((request, reply) => {

@@ -343,6 +343,21 @@ Open **Settings → Chroma Updates** to manage application updates:
   All Minecraft instances must be stopped first. Chroma blocks new instance
   starts during the upgrade and reconnects the Settings page after restarting.
 
+Starting with the 0.3.0 WebUI, confirming an upgrade opens a dedicated progress
+screen immediately. It shows the target version, elapsed time, connection state,
+and verified outcome. Connection loss during a restart keeps this screen open
+while Chroma reconnects. Refreshing the same tab resumes status checking without
+requesting another installation. Once the target version is available, the page
+reloads once to load its updated interface. If your session expired, sign in
+inside the recovery screen to finish checking the result; session expiry rules
+remain in effect. Completion requires both the expected version and the updater's
+successful health-check result. **Retry connection** only checks status.
+
+If completion cannot be confirmed, the screen explains that the upgrade may
+still be running. A reported installer failure remains visible with service-log
+guidance. Returning to Chroma after a failure requires the usual authentication;
+an installation retry still uses the normal confirmation and instance checks.
+
 Only stable releases tagged `vMAJOR.MINOR.PATCH` are considered. The shared Ubuntu
 AMD64 archive and its checksum must both be published. Prereleases and
 downgrades are excluded. Update checks do not require a GitHub API key.

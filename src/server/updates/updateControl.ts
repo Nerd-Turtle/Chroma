@@ -2,8 +2,9 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ChromaUpgradeProgress } from "../../shared/types/index.js";
 import { getRuntimePaths } from "../config/paths.js";
+import { CHROMA_UPGRADE_TIMEOUT_MS } from "../../shared/chromaUpdates.js";
 
-export const UPGRADE_TIMEOUT_MS = 35 * 60_000;
+export const UPGRADE_TIMEOUT_MS = CHROMA_UPGRADE_TIMEOUT_MS;
 let requestPending = false;
 
 export function getChromaUpdateDirectory(): string {

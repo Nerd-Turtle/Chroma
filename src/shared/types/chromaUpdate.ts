@@ -4,6 +4,8 @@ export type ChromaUpdateSettings = {
   checkIntervalHours: 6 | 12 | 24;
 };
 
+export type ChromaReadiness = { status: "ok"; version: string };
+
 export type ChromaRelease = {
   version: string;
   url: string;

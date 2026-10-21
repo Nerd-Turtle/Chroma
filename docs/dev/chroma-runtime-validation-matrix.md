@@ -198,6 +198,32 @@ Recommended fixture naming:
   - paged navigation works without mixing current and historical views
 - Cleanup: return the viewer to tail mode if you want the default workspace view restored.
 
+## Chroma upgrade recovery checks
+
+Use a disposable database and mocked release/installer under `.runtime`. Never
+stop the host service to simulate these cases. Confirm the following with the
+compiled WebUI and real authentication/update services:
+
+- Confirmation immediately opens global progress, including before acceptance.
+- Busy instances still block installation in both the UI and API.
+- A lost acceptance response (including a browser transport retry receiving
+  `409`) attaches to the existing job without another installer invocation.
+- API outages keep progress visible. Refresh resumes monitoring; reaching the
+  target version reloads the interface once and preserves the recovery marker.
+- Expired sessions show sign-in inside recovery after readiness returns. Wrong
+  credentials do not leave the recovery screen. Idle expiry remains enforced.
+- Success requires the matching job and expected installed version. Worker
+  failure, wrong-version success, and monitoring timeout cannot show completion.
+- **Retry connection** only reads status. Malformed/old recovery markers are
+  ignored, and another tab's active upgrade is detected by normal update polling.
+- Readiness exposes only status/version with no-store; detailed status remains
+  protected, HTML is revalidated, and normal install CSRF checks still apply.
+- Check a narrow viewport, initial heading focus, polite status announcements,
+  and reduced-motion presentation. No fabricated percentage or countdown appears.
+
+For a real release-to-release UX test, the starting installation must contain
+this recovery UI. Installing 0.3.0 from 0.2.0 still starts with the 0.2.0 client.
+
 ## Security regression checks
 
 Use disposable databases, worlds, dummy processes and empty/mocked provider credentials.

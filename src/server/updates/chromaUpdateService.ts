@@ -3,7 +3,7 @@ import type { FastifyBaseLogger } from "fastify";
 import { lstatSync } from "node:fs";
 import { createConnection } from "node:net";
 import { join } from "node:path";
-import type { ChromaRelease, ChromaUpdateSettings, ChromaUpdateStatus } from "../../shared/types/index.js";
+import type { ChromaReadiness, ChromaRelease, ChromaUpdateSettings, ChromaUpdateStatus } from "../../shared/types/index.js";
 import { getBdsRuntimeState } from "../bds/bdsRuntimeService.js";
 import { listInstances } from "../instances/instanceRepository.js";
 import { getAppSetting, upsertAppSetting } from "../setup/appSettingsRepository.js";
@@ -78,6 +78,10 @@ export class ChromaUpdateService {
     const stored = getAppSetting(this.db, SETTINGS_KEY);
     if (!stored) return { ...DEFAULT_SETTINGS };
     return validateChromaUpdateSettings(JSON.parse(stored));
+  }
+
+  async getReadiness(): Promise<ChromaReadiness> {
+    return { status: "ok", version: this.options.currentVersion ?? await getInstalledChromaVersion() };
   }
 
   saveSettings(input: unknown): ChromaUpdateSettings {

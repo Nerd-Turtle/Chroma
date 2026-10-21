@@ -4,6 +4,7 @@ import type {
   AddonUpdateSummary,
   ChromaUpdateSettings,
   ChromaUpdateStatus,
+  ChromaReadiness,
   AppSettingsResponse,
   AuthSessionResponse,
   AddonLibraryDownloadResponse,
@@ -161,9 +162,9 @@ function isAuthUser(value: unknown): value is AuthUser {
   return isJsonObject(value) && typeof value.id === "string" && typeof value.username === "string" && value.role === "admin";
 }
 
-export async function getSession(signal?: AbortSignal): Promise<AuthSessionResponse> {
+export async function getSession(signal?: AbortSignal, notifySessionExpired = true): Promise<AuthSessionResponse> {
   const response = await apiFetch("/api/auth/session", { signal: sessionRequestSignal(signal) });
-  const result = await readJson<AuthSessionResponse>(response);
+  const result = await readJson<AuthSessionResponse>(response, { notifySessionExpired });
   if (result.authenticated === false) return result;
   if (result.authenticated !== true || !isAuthUser(result.user)) {
     throw new ApiRequestError("Invalid session response", response.status);
@@ -182,8 +183,18 @@ export async function getAppSettings(): Promise<AppSettingsResponse> {
   return readJson<AppSettingsResponse>(response);
 }
 
-export async function getChromaUpdateStatus(): Promise<ChromaUpdateStatus> {
-  return readJson<ChromaUpdateStatus>(await apiFetch("/api/app/updates"));
+export async function getChromaReadiness(signal?: AbortSignal): Promise<ChromaReadiness> {
+  const result = await readJson<ChromaReadiness>(await apiFetch("/api/app/readiness", {
+    signal: sessionRequestSignal(signal), cache: "no-store",
+  }), { notifySessionExpired: false });
+  if (result.status !== "ok" || typeof result.version !== "string" || !/^\d+\.\d+\.\d+$/.test(result.version)) {
+    throw new ApiRequestError("Invalid Chroma readiness response", 200);
+  }
+  return result;
+}
+
+export async function getChromaUpdateStatus(options: { signal?: AbortSignal; notifySessionExpired?: boolean } = {}): Promise<ChromaUpdateStatus> {
+  return readJson<ChromaUpdateStatus>(await apiFetch("/api/app/updates", { signal: sessionRequestSignal(options.signal) }), options);
 }
 
 export async function checkChromaUpdates(): Promise<ChromaUpdateStatus> {
@@ -199,7 +210,8 @@ export async function saveChromaUpdateSettings(settings: ChromaUpdateSettings): 
 export async function installChromaUpdate(version: string): Promise<ChromaUpdateStatus> {
   return readJson<ChromaUpdateStatus>(await apiFetch("/api/app/updates/install", {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ version, confirmed: true }),
-  }));
+    signal: AbortSignal.timeout(30_000),
+  }), { notifySessionExpired: false });
 }
 
 export async function updateAppSettings(payload: UpdateAppSettingsRequest): Promise<AppSettingsResponse> {
