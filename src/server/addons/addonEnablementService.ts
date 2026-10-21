@@ -228,6 +228,8 @@ async function enableAddonForInstanceUnlocked(db: Database, instanceId: string, 
       throw new Error(`Imported pack folder already exists: ${importedPath}`);
     }
 
+    // Reuse the same source containment policy for both downloaded and restored packs.
+    // https://cwe.mitre.org/data/definitions/22.html
     const sourcePath = resolveAddonSourcePath(instance, pack.sourcePath);
     await copyDirectoryRecursive(sourcePath, importedPath);
 

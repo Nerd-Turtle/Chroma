@@ -167,6 +167,10 @@ main() {
 
   log "Installing the locked dependency graph"
   corepack pnpm install --frozen-lockfile
+  # OWASP Vulnerable Dependency Management: fail release packaging on known moderate+ prod advisories.
+  # https://cheatsheetseries.owasp.org/cheatsheets/Vulnerable_Dependency_Management_Cheat_Sheet.html
+  log "Auditing production dependencies"
+  corepack pnpm audit --prod --audit-level moderate
   log "Building the server and web UI"
   corepack pnpm build
   corepack pnpm build:web

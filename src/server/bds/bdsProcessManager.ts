@@ -80,6 +80,8 @@ export class BdsProcessManager {
 
     assertChromaUpgradeNotInProgress();
     assertNoAddonUpdateInProgress(instance);
+    // Fixed executable with no shell: console/API input cannot become a shell command.
+    // https://cheatsheetseries.owasp.org/cheatsheets/OS_Command_Injection_Defense_Cheat_Sheet.html
     const child = spawn(`./${basename(executablePath)}`, {
       cwd: bdsDirectory,
       env: {
@@ -139,7 +141,8 @@ export class BdsProcessManager {
 
     child.on("exit", (code, signal) => {
       const stoppedAt = new Date().toISOString();
-      const status = code === 0 ? "stopped" : "error";
+      const stopRequested = this.runtimeStates.get(instance.id)?.desiredStatus === "stopped";
+      const status = code === 0 || stopRequested ? "stopped" : "error";
       const pid = child.pid;
       this.setRuntimeState(instance.id, buildRuntimeState(instance.id, {
         status,
@@ -196,6 +199,9 @@ export class BdsProcessManager {
     }
 
     if (!child) {
+      // Idempotent stop: an exited process must not leave stale "error"/active state behind.
+      // Node documents that exitCode/signalCode, not child.killed, indicate observed exit:
+      // https://nodejs.org/docs/latest-v24.x/api/child_process.html#subprocesskilled
       const stopped = buildRuntimeState(instanceId, {
         status: "stopped",
         desiredStatus: "stopped",
@@ -255,12 +261,13 @@ export class BdsProcessManager {
 
       const onExit = (code: number | null, signal: NodeJS.Signals | null) => {
         const stoppedAt = new Date().toISOString();
-        const status = code === 0 ? "stopped" : "error";
         const pid = child.pid;
+        // Only the observed exit confirms a completed stop, including forced termination.
+        // Keep exitCode/signal for diagnosis without leaving a dead instance marked active/error.
         finish(buildRuntimeState(instanceId, {
-          status,
+          status: "stopped",
           desiredStatus: "stopped",
-          healthStatus: status === "stopped" ? "unknown" : "unhealthy",
+          healthStatus: "unknown",
           maintenanceStatus: saved?.maintenanceStatus ?? "idle",
           isProcessActive: false,
           recentLogTail: this.getRecentLogTail(instanceId),
@@ -269,7 +276,7 @@ export class BdsProcessManager {
           stoppedAt,
           exitCode: code,
           signal: signal ?? null,
-          message: status === "stopped" ? "Process stopped cleanly" : "Process stopped with error",
+          message: code === 0 ? "Process stopped cleanly" : `Process stopped (${signal ?? `exit ${code}`})`,
         }));
       };
 
@@ -305,6 +312,8 @@ export class BdsProcessManager {
       }, STOP_TIMEOUT_MS);
 
       termTimer = setTimeout(() => {
+        // child.killed only reports that a signal was sent, so SIGTERM must not suppress SIGKILL.
+        // https://nodejs.org/docs/latest-v24.x/api/child_process.html#subprocesskilled
         if (child.exitCode === null && child.signalCode === null) {
           child.kill("SIGKILL");
         }
@@ -504,91 +513,62 @@ export class BdsProcessManager {
     saved: BdsRuntimeState,
     instance?: Instance,
   ): Promise<BdsRuntimeState> {
-    const stoppingState = buildRuntimeState(instanceId, {
-      status: "stopping",
-      desiredStatus: "stopped",
-      healthStatus: "pending",
-      maintenanceStatus: saved.maintenanceStatus,
-      isProcessActive: true,
-      recentLogTail: this.getRecentLogTail(instanceId),
-      pid,
-      ...(saved.startedAt ? { startedAt: saved.startedAt } : {}),
-      message: "Stopping rediscovered process without a live stdin channel.",
-    });
-
-    this.setRuntimeState(instanceId, stoppingState);
-
-    try {
-      process.kill(pid, "SIGTERM");
-    } catch {
-      if (instance) {
-        await removeRuntimeHandle(instance).catch(() => undefined);
-      }
-
+    const publish = (status: "stopping" | "stopped" | "unknown" | "error", active: boolean, message: string) => {
       const state = buildRuntimeState(instanceId, {
-        status: "unknown",
+        status,
         desiredStatus: "stopped",
-        healthStatus: "unhealthy",
-        isProcessActive: false,
+        healthStatus: status === "stopped" ? "unknown" : status === "stopping" ? "pending" : "unhealthy",
+        maintenanceStatus: saved.maintenanceStatus,
+        isProcessActive: active,
         recentLogTail: this.getRecentLogTail(instanceId),
         pid,
         ...(saved.startedAt ? { startedAt: saved.startedAt } : {}),
-        stoppedAt: new Date().toISOString(),
-        message: "Rediscovered process could not be signaled during stop.",
+        ...(!active ? { stoppedAt: new Date().toISOString() } : {}),
+        message,
       });
       this.setRuntimeState(instanceId, state);
       return state;
-    }
-
-    const start = Date.now();
-    while (Date.now() - start < STOP_TIMEOUT_MS) {
-      const inspection = await inspectRediscoverableProcess(pid, `${instance?.instancePath ?? ""}/bds`);
-      if (!inspection.exists) {
-        if (instance) {
-          await removeRuntimeHandle(instance).catch(() => undefined);
-        }
-
-        const state = buildRuntimeState(instanceId, {
-          status: "stopped",
-          desiredStatus: "stopped",
-          healthStatus: "unknown",
-          isProcessActive: false,
-          recentLogTail: this.getRecentLogTail(instanceId),
-          pid,
-          ...(saved.startedAt ? { startedAt: saved.startedAt } : {}),
-          stoppedAt: new Date().toISOString(),
-          message: "Rediscovered process stopped after reconciliation.",
-        });
-        this.setRuntimeState(instanceId, state);
-        return state;
+    };
+    const finishStopped = async () => {
+      if (instance) await removeRuntimeHandle(instance).catch(() => undefined);
+      return publish("stopped", false, "Rediscovered process stopped after reconciliation.");
+    };
+    if (!instance) return publish("unknown", true, "Cannot verify the rediscovered process without its instance path.");
+    const inspect = () => inspectRediscoverableProcess(pid, `${instance.instancePath}/bds`);
+    const waitForExit = async (timeoutMs: number) => {
+      const started = Date.now();
+      while (Date.now() - started < timeoutMs) {
+        if (!(await inspect()).exists) return true;
+        await new Promise((resolve) => setTimeout(resolve, 250));
       }
+      return !(await inspect()).exists;
+    };
 
-      await new Promise((resolve) => setTimeout(resolve, 250));
+    // CWE-367: recheck the persisted PID's identity before each signal; PIDs can be reused.
+    // https://cwe.mitre.org/data/definitions/367.html
+    const inspection = await inspect();
+    if (!inspection.exists) return finishStopped();
+    if (!inspection.matchesExpectedInstance) return publish("unknown", true, "The rediscovered PID no longer matches this instance; no signal was sent.");
+    publish("stopping", true, "Stopping rediscovered process without a live stdin channel.");
+    try { process.kill(pid, "SIGTERM"); }
+    catch {
+      if (!(await inspect()).exists) return finishStopped();
+      return publish("error", true, "Rediscovered process could not be signaled during stop.");
     }
+    if (await waitForExit(STOP_TIMEOUT_MS)) return finishStopped();
 
-    try {
-      process.kill(pid, "SIGKILL");
-    } catch {
-      // ignore follow-up signal failure
+    const remaining = await inspect();
+    if (!remaining.exists) return finishStopped();
+    if (!remaining.matchesExpectedInstance) return publish("unknown", true, "The PID changed identity before forced stop; no further signal was sent.");
+    try { process.kill(pid, "SIGKILL"); }
+    catch {
+      if (!(await inspect()).exists) return finishStopped();
+      return publish("error", true, "Rediscovered process could not be force-stopped.");
     }
-
-    if (instance) {
-      await removeRuntimeHandle(instance).catch(() => undefined);
-    }
-
-    const state = buildRuntimeState(instanceId, {
-      status: "error",
-      desiredStatus: "stopped",
-      healthStatus: "unhealthy",
-      isProcessActive: false,
-      recentLogTail: this.getRecentLogTail(instanceId),
-      pid,
-      ...(saved.startedAt ? { startedAt: saved.startedAt } : {}),
-      stoppedAt: new Date().toISOString(),
-      message: "Rediscovered process required forced termination during stop.",
-    });
-    this.setRuntimeState(instanceId, state);
-    return state;
+    // Sending SIGKILL does not prove exit; keep the handle/active state if exit is unconfirmed.
+    // https://nodejs.org/docs/latest-v24.x/api/child_process.html#subprocesskilled
+    if (await waitForExit(TERM_TIMEOUT_MS)) return finishStopped();
+    return publish("error", true, "Forced termination was sent, but process exit could not be confirmed.");
   }
 
   private appendRecentLogTail(instanceId: string, chunk: string): void {

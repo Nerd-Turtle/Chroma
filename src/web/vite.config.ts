@@ -6,7 +6,8 @@ const webDistDir = process.env.CHROMA_WEB_DIST_DIR;
 const apiProxy = {
   "/api": {
     target: "http://127.0.0.1:3000",
-    changeOrigin: true,
+    // Preserve the browser's Host for the API's exact Origin check during development.
+    changeOrigin: false,
   },
 };
 

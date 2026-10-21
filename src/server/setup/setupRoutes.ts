@@ -1,6 +1,7 @@
 import type { Database } from "better-sqlite3";
 import type { FastifyInstance } from "fastify";
 import type { SetupCompleteRequest, SetupStatusResponse, UpdateAppSettingsRequest } from "../../shared/types/index.js";
+import { PasswordHashBusyError } from "../auth/passwords.js";
 import { requireAuthenticated } from "../auth/authGuard.js";
 import { getDashboardSummary } from "../dashboard/dashboardService.js";
 import { completeInitialSetup, getAppSettings, isSetupComplete, updateAppSettings } from "./setupService.js";
@@ -12,8 +13,8 @@ export function registerSetupRoutes(app: FastifyInstance, db: Database): void {
     };
   });
 
-  app.post("/api/setup/complete", async (request, reply) => {
-    const body = request.body as Partial<SetupCompleteRequest>;
+  app.post("/api/setup/complete", { bodyLimit: 16 * 1024 }, async (request, reply) => {
+    const body = (request.body ?? {}) as Partial<SetupCompleteRequest>;
     if (isSetupComplete(db)) {
       return reply.code(400).send({ error: "Setup is already complete" });
     }
@@ -22,8 +23,8 @@ export function registerSetupRoutes(app: FastifyInstance, db: Database): void {
       return reply.code(400).send({ error: "username must be 3-64 characters" });
     }
 
-    if (typeof body.password !== "string" || body.password.length < 8) {
-      return reply.code(400).send({ error: "password must be at least 8 characters" });
+    if (typeof body.password !== "string" || body.password.length < 8 || body.password.length > 1024) {
+      return reply.code(400).send({ error: "password must be 8-1024 characters" });
     }
 
     if (typeof body.timezone !== "string" || body.timezone.trim() === "") {
@@ -56,6 +57,7 @@ export function registerSetupRoutes(app: FastifyInstance, db: Database): void {
       await completeInitialSetup(db, setupInput);
       return { success: true };
     } catch (error) {
+      if (error instanceof PasswordHashBusyError) return reply.header("Retry-After", 5).code(429).send({ error: error.message });
       const message = error instanceof Error ? error.message : "Setup failed";
       return reply.code(400).send({ error: message });
     }
@@ -78,7 +80,13 @@ export function registerSetupRoutes(app: FastifyInstance, db: Database): void {
   });
 
   app.put("/api/app/settings", { preHandler: requireAuthenticated(db) }, async (request, reply) => {
-    const body = request.body as Partial<UpdateAppSettingsRequest>;
+    const body = (request.body ?? {}) as Partial<UpdateAppSettingsRequest>;
+
+    if (body.sessionIdleTimeoutMinutes !== undefined &&
+      (typeof body.sessionIdleTimeoutMinutes !== "number" || !Number.isInteger(body.sessionIdleTimeoutMinutes) ||
+        body.sessionIdleTimeoutMinutes < 1 || body.sessionIdleTimeoutMinutes > 120)) {
+      return reply.code(400).send({ error: "sessionIdleTimeoutMinutes must be an integer between 1 and 120" });
+    }
 
     if (typeof body.timezone !== "string" || body.timezone.trim() === "") {
       return reply.code(400).send({ error: "timezone is required" });
@@ -116,6 +124,7 @@ export function registerSetupRoutes(app: FastifyInstance, db: Database): void {
         timezone: body.timezone.trim(),
         language: body.language.trim(),
         notificationDurationSeconds: body.notificationDurationSeconds,
+        ...(body.sessionIdleTimeoutMinutes !== undefined ? { sessionIdleTimeoutMinutes: body.sessionIdleTimeoutMinutes } : {}),
         ...(body.curseForgeApiKey?.trim() ? { curseForgeApiKey: body.curseForgeApiKey.trim() } : {}),
         ...(body.clearCurseForgeApiKey !== undefined ? { clearCurseForgeApiKey: body.clearCurseForgeApiKey } : {}),
       };

@@ -161,8 +161,11 @@ export type CurseForgeAddonSearchPagination = {
   totalCount: number;
 };
 
+export type AddonReleaseChannel = "stable" | "beta" | "alpha";
+
 export type AddonUpdateSettings = {
   automaticChecksEnabled: boolean;
+  releaseChannel: AddonReleaseChannel;
   updateCheckFrequency: InstanceUpdateCheckFrequency;
   updateCheckTime: string;
   updateCheckWeekday: InstanceUpdateCheckWeekday;

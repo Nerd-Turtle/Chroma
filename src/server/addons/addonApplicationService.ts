@@ -47,6 +47,9 @@ function assertChildPath(parentPath: string, childPath: string): void {
 }
 
 export function resolveAddonSourcePath(instance: Instance, sourcePath: string): string {
+  // CWE-22: allow only the shared library or this instance's restored source directory.
+  // Restored files do not need to become shared-library records to be enabled.
+  // https://cwe.mitre.org/data/definitions/22.html
   const resolvedPath = resolveRuntimeManagedPath(sourcePath);
   const libraryRoot = getAddonDownloadBasePath();
   const restoredAddonRoot = join(instance.instancePath, "csm", "restored-addons");

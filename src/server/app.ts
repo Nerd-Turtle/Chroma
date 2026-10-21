@@ -7,6 +7,8 @@ import type { ServerOptions as HttpsServerOptions } from "node:https";
 import { resolve } from "node:path";
 import { getDatabasePath, getRuntimePaths } from "./config/paths.js";
 import { registerAuthRoutes } from "./auth/authRoutes.js";
+import { registerAuthenticationThrottle } from "./auth/authThrottle.js";
+import { registerRequestProtection } from "./auth/requestProtection.js";
 import { registerInstanceRoutes } from "./instances/instanceRoutes.js";
 import { registerPkiRoutes } from "./pki/pkiRoutes.js";
 import type { TlsCertificateMaterial } from "./pki/pkiService.js";
@@ -31,6 +33,8 @@ export function buildApp(db: Database, options: BuildAppOptions = {}) {
   });
 
   void app.register(cookie);
+  registerRequestProtection(app);
+  registerAuthenticationThrottle(app);
 
   app.get("/health", async () => {
     return {

@@ -30,6 +30,8 @@ export async function runUpgradeWorker(version: string, options: {
   };
   try {
     // Independently verify the request; the unprivileged application supplies no URL or command.
+    // OWASP Authorization: enforce permissions again at the privileged operation boundary.
+    // https://cheatsheetseries.owasp.org/cheatsheets/Authorization_Cheat_Sheet.html#enforce-least-privileges
     const release = await options.getRelease();
     if (release?.version !== version || !release.compatible) throw new Error("The requested version is no longer the latest compatible stable release. Check for updates again.");
     writeProgress(options.directory, progress);
@@ -90,6 +92,8 @@ async function main(): Promise<void> {
         await new Promise((resolve) => setTimeout(resolve, 1_000));
         await new Promise<void>((resolve, reject) => {
           const child = spawn("/usr/bin/bash", [INSTALLER, "--version", targetVersion, "--yes"], {
+            // Fixed executable/installer and validated argv; no request text is shell source.
+            // https://cheatsheetseries.owasp.org/cheatsheets/OS_Command_Injection_Defense_Cheat_Sheet.html#argument-injection
             env: { PATH: "/usr/sbin:/usr/bin:/sbin:/bin" },
             stdio: ["ignore", 2, 2],
             timeout: 25 * 60_000,

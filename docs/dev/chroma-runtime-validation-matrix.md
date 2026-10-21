@@ -198,6 +198,80 @@ Recommended fixture naming:
   - paged navigation works without mixing current and historical views
 - Cleanup: return the viewer to tail mode if you want the default workspace view restored.
 
+## Security regression checks
+
+Use disposable databases, worlds, dummy processes and empty/mocked provider credentials.
+Keep all fixtures under `.runtime`; never run these destructive fault cases against a live world.
+
+1. Submit simultaneous initial setup requests with distinct usernames, including requests from
+   separate SQLite connections. Exactly one administrator/settings set must commit. Inject a
+   settings-write failure and verify that no account or setup flag remains before retrying.
+2. Verify session tokens contain 32 random bytes, SQLite stores only their SHA-256 verifier,
+   the verifier cannot authenticate as a bearer token, and legacy/expired/revoked tokens fail.
+3. Use a dummy executable that ignores console `stop` and `SIGTERM`. Verify `SIGKILL` is
+   delivered, exit is observed, and explicit stop records `stopped`. Repeat after runtime
+   reconciliation and after the process has already exited. Unexpected crashes remain errors.
+4. Call the direct BDS install endpoint for an existing installation. Verify rejection occurs
+   before downloads, install-state changes or configuration writes. Test executable-only
+   installations too. Managed BDS updates must still create a backup and restore configuration.
+5. Import a self-contained addon backup into an empty library. Rerun migrations before enabling
+   the addon. Its source files must remain usable, its library state must remain `missing`,
+   and startup must not create shared-library records or links for it.
+6. Run `corepack pnpm audit --prod` and `corepack pnpm audit`. Rebuild the release and exercise
+   its bundled Node/SQLite/server modules. Packaging rejects moderate-or-higher production
+   advisories; audit success does not establish that every dependency is vulnerability-free.
+
+Source comments cite the individual controls they implement: OWASP session storage/cookie
+handling, authorization, salts, parameterized SQL, file-upload limits, secrets handling and
+command arguments; CWE path/workflow/race protections; Node process-signal semantics; and
+CIS recovery copies. These annotations are references for review, not a compliance certification.
+
+### Authentication hardening (implemented)
+
+The four follow-ups from the security review are implemented. The checks below are
+repeatable release validation steps, not outstanding implementation tasks.
+
+7. Exercise login throttling from both one source and rotating sources/usernames. Within
+   a five-minute window, login allows 5 attempts per username, 10 per peer IP and 60 total;
+   setup allows 5 per peer IP and 10 total. All attempts count, including successful and
+   malformed ones. Excess attempts return `429` with `Retry-After`; blocked requests do
+   not extend the window. Spoofed forwarding headers must not change the peer identity.
+   These bounded counters are process-local and reset when Chroma restarts. At most two
+   password derivations run concurrently; further work returns a retryable `429`.
+8. Verify new passwords use versioned scrypt (`N=131072`, `r=8`, `p=1`) with fresh 16-byte
+   salts. Verify an old `scrypt$salt$hash` account can sign in and is rehashed only after
+   successful verification; failed attempts leave it unchanged. Unknown usernames receive
+   the same credentials error and incur a current-cost derivation. Reject unknown/malformed
+   hash formats without accepting arbitrary work factors. Record hashing time on the target
+   VM. See [OWASP password storage](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html#scrypt).
+9. Confirm **Settings → Security → Session inactivity timeout (minutes)** defaults to 10,
+   accepts integers 1–120 and persists across reloads. The policy applies to all sessions
+   immediately on the next authentication check; the seven-day absolute limit remains.
+   Test idle and absolute deadlines, expired-token renewal rejection and schema migration.
+   Existing sessions inherit their creation time as last activity, not a fresh restart time.
+   GET polling/session inspection and console streams must not renew idle time. Real UI
+   input sends at most one heartbeat per 30 seconds, including a trailing heartbeat; actions
+   also renew valid sessions. Read-only session checks redirect an idle UI within 15 seconds
+   under normal foreground scheduling. Background-tab timer suspension may delay the UI
+   redirect, but never server enforcement. Open console streams check on each event and
+   each 15-second heartbeat, and close on expiry/revocation.
+10. Verify every unsafe `/api/` method requires `X-Chroma-Request: 1`, including login,
+    setup, logout, activity and multipart backup imports. Reject foreign/null/malformed
+    Origin headers, foreign Referers and `cross-site`/`same-site` Fetch Metadata, even with
+    the custom header. Without browser origin metadata, non-browser clients must still
+    supply the header. Test same-origin UI requests, dev Vite proxy requests and disabled
+    CORS/preflight responses. Cookie flags remain defense in depth. All API responses use
+    `Cache-Control: no-store` (console streams use their streaming cache policy).
+
+CSRF assessment: JSON validation and SameSite cookies alone did not explicitly protect
+bodyless mutations or multipart uploads, and SameSite also treats sibling origins as the
+same site. Chroma now uses the [OWASP custom-header API defense](https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html#employing-custom-request-headers-for-ajaxapi)
+with Origin/Referer and Fetch Metadata checks. CORS stays disabled. This assessment found
+a protection gap; it does not claim that a production exploit was demonstrated. Production
+serves HTTPS directly; the development Vite proxy preserves Host for exact-origin checks.
+A future reverse-proxy/CORS deployment must explicitly review this trust boundary rather
+than blindly enabling forwarded-header trust or allowing arbitrary origins.
+
 ## Cleanup Pass
 
 After the matrix:

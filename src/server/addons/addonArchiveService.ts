@@ -158,6 +158,8 @@ function extractLeadingJsonObject(json: string): string | undefined {
 }
 
 function makeSafePath(targetDir: string, entryPath: string): string {
+  // OWASP File Upload / CWE-22: treat archive filenames as untrusted paths.
+  // https://cheatsheetseries.owasp.org/cheatsheets/File_Upload_Cheat_Sheet.html#filename-safety
   const normalized = normalize(entryPath);
 
   if (isAbsolute(normalized)) {
@@ -226,6 +228,8 @@ function extractZipEntry(zipFile: yauzl.ZipFile, entry: yauzl.Entry, destination
 }
 
 async function extractZipArchive(zipPath: string, destination: string): Promise<void> {
+  // OWASP File Upload: reject symlinks, cap expanded entries/bytes, and create files exclusively.
+  // https://cheatsheetseries.owasp.org/cheatsheets/File_Upload_Cheat_Sheet.html#upload-and-download-limits
   await mkdir(destination, { recursive: true });
 
   await new Promise<void>((resolve, reject) => {

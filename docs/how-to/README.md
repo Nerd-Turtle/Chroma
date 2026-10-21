@@ -120,6 +120,22 @@ details on the server, following [OWASP's session token guidance](https://cheats
 Upgrading from a version that issued short `sess_` tokens requires signing in
 again; those older cookies are no longer accepted.
 
+Inactive sessions expire after **10 minutes** by default. Change the timeout for all users
+under **Settings → Security** (1–120 minutes). Mouse, keyboard and touch activity keep a
+valid session active; background refreshes do not. Chroma enforces expiry on the server
+and returns the WebUI to sign-in. Sessions also expire seven days after login regardless
+of activity. After this upgrade, older sessions may require signing in again.
+
+Passwords use [OWASP-recommended scrypt work factors](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html#scrypt).
+Existing passwords remain valid and their older hashes upgrade on the next successful
+login. Login/setup attempts are throttled; if Chroma asks you to wait, retry after the
+reported interval. Passwords support 8–1024 characters without truncation.
+
+Scripts calling state-changing API endpoints must include `X-Chroma-Request: 1` as well
+as their normal authentication/JSON or multipart headers. The WebUI sends this
+[CSRF protection header](https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html#employing-custom-request-headers-for-ajaxapi)
+automatically. Cross-origin browser mutations are rejected.
+
 ## Create your first instance
 
 1. Open **Instances → Create Instance**.
@@ -214,8 +230,21 @@ simply be deleted from the library.
 
 In **Addon Library → Downloaded**, enable **Download updates automatically**
 and use the pencil icon to choose a daily or weekly library schedule. Chroma
-checks CurseForge and downloads the latest available stable releases once into
-the central library. **Check and download updates** runs that check manually.
+checks CurseForge and downloads allowed releases once into the central library.
+Under **Allowed releases**, choose **Stable only** (the default), **Stable +
+Beta**, or **Stable + Beta + Alpha**. This preference also controls which
+downloaded releases instances may adopt automatically. Existing downloads are
+retained when the preference changes.
+
+Use the circular arrow icon beside the pencil, **Check for updates now**, to run
+that check manually. The service always reports completion or failure in a
+notification banner. Each addon with a warning or error gets its own yellow
+notification; successful addons do not produce individual notifications. Addon
+failures do not fail the service or stop checks for other addons. Warnings and
+service errors stay visible until dismissed; completion messages use the
+notification duration in Chroma Settings. Manual checks and release settings
+are available even when automatic downloads are off. Scheduled library checks
+also report new results while **Downloaded** is open.
 Both schedules use the timezone configured in Chroma Settings.
 
 Instances adopt downloaded releases on their own daily or weekly update
@@ -226,15 +255,18 @@ may advance. Turn that preference off to pin an instance to its current addon
 version. Disabling the library schedule stops automatic downloads; instance
 schedules can still adopt releases already downloaded.
 
-Running or busy instances wait until stopped and idle. An addon update alone
+Running or busy instances wait until stopped and idle. A failed addon does not
+prevent other queued addons from updating after rollback succeeds. An unfinished
+recovery blocks further changes to that instance until recovery completes;
+other instances can continue. An addon update alone
 does not stop or start a Minecraft server. If a scheduled Bedrock update already
 stops the instance, eligible addons can update before its normal restart.
 Chroma creates an internal world/configuration backup, preserves addon
 enablement and stack order, and retains older library releases. Files still
 referenced by instances or pending updates cannot be deleted from the library.
 
-Review **Library updates** or an instance's **Scheduled addon updates** panel
-for pending work and errors. Unconfirmed Bedrock compatibility, changed pack
+Review an instance's **Scheduled addon updates** panel for pending work and
+errors. Unconfirmed Bedrock compatibility, changed pack
 identities, missing checksums or dependencies, provider dependency/conflict rules,
 and Script API dependencies are held for manual review. Coordinated updates across dependent addons require
 manual management. These checks do not guarantee gameplay compatibility.
@@ -277,7 +309,7 @@ also separate from instance exports.
 ## Application settings and HTTPS
 
 Use **Settings** to change timezone, language preference, notification duration,
-or the CurseForge API key. Save application settings after making changes.
+session inactivity timeout, or the CurseForge API key. Save application settings after making changes.
 
 For a certificate issued by your certificate authority:
 

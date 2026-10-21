@@ -18,6 +18,8 @@ export function getUserById(db: Database, userId: string): UserRecord | undefine
 }
 
 export function getUserByUsername(db: Database, username: string): UserRecord | undefined {
+  // OWASP SQL Injection Prevention: bind input as data; never interpolate it into SQL text.
+  // https://cheatsheetseries.owasp.org/cheatsheets/SQL_Injection_Prevention_Cheat_Sheet.html#defense-option-1-use-of-prepared-statements-with-parameterized-queries
   const row = db.prepare("SELECT * FROM users WHERE username = ?").get(username);
   return row ? mapUserRow(row) : undefined;
 }
@@ -47,4 +49,9 @@ export function insertUser(db: Database, user: UserRecord): void {
     created_at: user.createdAt,
     updated_at: user.updatedAt,
   });
+}
+
+export function updateUserPasswordHash(db: Database, userId: string, oldHash: string, newHash: string): void {
+  db.prepare("UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ? AND password_hash = ?")
+    .run(newHash, new Date().toISOString(), userId, oldHash);
 }

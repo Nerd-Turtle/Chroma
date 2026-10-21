@@ -216,6 +216,8 @@ export async function generatePkiCsr(input: GeneratePkiCsrRequest): Promise<Gene
   ].join("");
 
   try {
+    // OWASP OS Command Injection Defense: use validated values as argv, without a shell.
+    // https://cheatsheetseries.owasp.org/cheatsheets/OS_Command_Injection_Defense_Cheat_Sheet.html#argument-injection
     await execFileAsync(
       "openssl",
       [

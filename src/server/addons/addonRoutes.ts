@@ -69,6 +69,7 @@ export async function registerAddonRoutes(app: FastifyInstance, db: Database): P
   app.put("/api/addons/settings", async (request, reply) => {
     const body = (request.body ?? {}) as {
       automaticChecksEnabled?: unknown;
+      releaseChannel?: unknown;
       updateCheckFrequency?: unknown;
       updateCheckTime?: unknown;
       updateCheckWeekday?: unknown;
@@ -76,6 +77,10 @@ export async function registerAddonRoutes(app: FastifyInstance, db: Database): P
 
     if (typeof body.automaticChecksEnabled !== "boolean") {
       return reply.code(400).send({ error: "automaticChecksEnabled must be a boolean" });
+    }
+
+    if (body.releaseChannel !== undefined && body.releaseChannel !== "stable" && body.releaseChannel !== "beta" && body.releaseChannel !== "alpha") {
+      return reply.code(400).send({ error: "releaseChannel must be stable, beta or alpha" });
     }
 
     if (body.updateCheckFrequency !== "daily" && body.updateCheckFrequency !== "weekly") {
@@ -102,6 +107,7 @@ export async function registerAddonRoutes(app: FastifyInstance, db: Database): P
       return {
         settings: saveAddonUpdateSettings(db, {
           automaticChecksEnabled: body.automaticChecksEnabled,
+          releaseChannel: body.releaseChannel ?? getAddonUpdateSettings(db).releaseChannel,
           updateCheckFrequency: body.updateCheckFrequency,
           updateCheckTime: body.updateCheckTime,
           updateCheckWeekday: body.updateCheckWeekday,

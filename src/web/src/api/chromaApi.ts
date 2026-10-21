@@ -51,6 +51,8 @@ import type {
   UpdateInstanceServerPropertiesRequest,
 } from "../../../shared/types/index.js";
 
+export const SESSION_EXPIRED_EVENT = "chroma:session-expired";
+
 export class ApiRequestError extends Error {
   readonly status: number;
   readonly validation: BdsStartValidationResult | undefined;
@@ -63,7 +65,22 @@ export class ApiRequestError extends Error {
   }
 }
 
-async function readJson<T>(response: Response): Promise<T> {
+// OWASP CSRF Prevention: all mutations, including bodyless actions and FormData,
+// carry a non-simple header. The server rejects it from foreign browser origins.
+async function apiFetch(url: string, options: RequestInit = {}): Promise<Response> {
+  const headers = new Headers(options.headers);
+  if (!["GET", "HEAD", "OPTIONS"].includes((options.method ?? "GET").toUpperCase())) {
+    headers.set("X-Chroma-Request", "1");
+  }
+  return fetch(url, { ...options, headers, credentials: "same-origin" });
+}
+
+async function readJson<T>(response: Response, options: { notifySessionExpired?: boolean } = {}): Promise<T> {
+  if (response.status === 401 && options.notifySessionExpired !== false) {
+    window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
+    throw new ApiRequestError("Authentication required", 401);
+  }
+
   const text = await response.text();
 
   if (text.trim() === "") {
@@ -94,12 +111,12 @@ async function readJson<T>(response: Response): Promise<T> {
 }
 
 export async function getSetupStatus(): Promise<SetupStatusResponse> {
-  const response = await fetch("/api/setup/status");
+  const response = await apiFetch("/api/setup/status");
   return readJson<SetupStatusResponse>(response);
 }
 
 export async function completeSetup(payload: SetupCompleteRequest): Promise<{ success: true }> {
-  const response = await fetch("/api/setup/complete", {
+  const response = await apiFetch("/api/setup/complete", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -109,59 +126,62 @@ export async function completeSetup(payload: SetupCompleteRequest): Promise<{ su
 }
 
 export async function login(payload: LoginRequest): Promise<LoginResponse> {
-  const response = await fetch("/api/auth/login", {
+  const response = await apiFetch("/api/auth/login", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
 
-  return readJson<LoginResponse>(response);
+  // Incorrect credentials belong to the login form, not session-expiry handling.
+  return readJson<LoginResponse>(response, { notifySessionExpired: false });
 }
 
 export async function logout(): Promise<void> {
-  await fetch("/api/auth/logout", {
-    method: "POST",
-  });
+  await readJson(await apiFetch("/api/auth/logout", { method: "POST" }));
+}
+
+export async function recordSessionActivity(): Promise<void> {
+  await readJson(await apiFetch("/api/auth/activity", { method: "POST" }));
 }
 
 export async function getSession(): Promise<AuthSessionResponse> {
-  const response = await fetch("/api/auth/session");
+  const response = await apiFetch("/api/auth/session");
   return readJson<AuthSessionResponse>(response);
 }
 
 export async function getDashboardSummary(): Promise<DashboardSummary> {
-  const response = await fetch("/api/dashboard/summary");
+  const response = await apiFetch("/api/dashboard/summary");
   const result = await readJson<{ summary: DashboardSummary }>(response);
   return result.summary;
 }
 
 export async function getAppSettings(): Promise<AppSettingsResponse> {
-  const response = await fetch("/api/app/settings");
+  const response = await apiFetch("/api/app/settings");
   return readJson<AppSettingsResponse>(response);
 }
 
 export async function getChromaUpdateStatus(): Promise<ChromaUpdateStatus> {
-  return readJson<ChromaUpdateStatus>(await fetch("/api/app/updates"));
+  return readJson<ChromaUpdateStatus>(await apiFetch("/api/app/updates"));
 }
 
 export async function checkChromaUpdates(): Promise<ChromaUpdateStatus> {
-  return readJson<ChromaUpdateStatus>(await fetch("/api/app/updates/check", { method: "POST" }));
+  return readJson<ChromaUpdateStatus>(await apiFetch("/api/app/updates/check", { method: "POST" }));
 }
 
 export async function saveChromaUpdateSettings(settings: ChromaUpdateSettings): Promise<ChromaUpdateStatus> {
-  return readJson<ChromaUpdateStatus>(await fetch("/api/app/updates/settings", {
+  return readJson<ChromaUpdateStatus>(await apiFetch("/api/app/updates/settings", {
     method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(settings),
   }));
 }
 
 export async function installChromaUpdate(version: string): Promise<ChromaUpdateStatus> {
-  return readJson<ChromaUpdateStatus>(await fetch("/api/app/updates/install", {
+  return readJson<ChromaUpdateStatus>(await apiFetch("/api/app/updates/install", {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ version, confirmed: true }),
   }));
 }
 
 export async function updateAppSettings(payload: UpdateAppSettingsRequest): Promise<AppSettingsResponse> {
-  const response = await fetch("/api/app/settings", {
+  const response = await apiFetch("/api/app/settings", {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -171,12 +191,12 @@ export async function updateAppSettings(payload: UpdateAppSettingsRequest): Prom
 }
 
 export async function getPkiStatus(): Promise<PkiStatusResponse> {
-  const response = await fetch("/api/pki/status");
+  const response = await apiFetch("/api/pki/status");
   return readJson<PkiStatusResponse>(response);
 }
 
 export async function generatePkiCsr(payload: GeneratePkiCsrRequest): Promise<GeneratePkiCsrResponse> {
-  const response = await fetch("/api/pki/csr", {
+  const response = await apiFetch("/api/pki/csr", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -185,7 +205,7 @@ export async function generatePkiCsr(payload: GeneratePkiCsrRequest): Promise<Ge
 }
 
 export async function installPkiCertificate(certificatePem: string): Promise<InstallPkiCertificateResponse> {
-  const response = await fetch("/api/pki/certificate", {
+  const response = await apiFetch("/api/pki/certificate", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ certificatePem }),
@@ -194,46 +214,46 @@ export async function installPkiCertificate(certificatePem: string): Promise<Ins
 }
 
 export async function getInstances(): Promise<InstanceListResponse> {
-  const response = await fetch("/api/instances");
+  const response = await apiFetch("/api/instances");
   return readJson<InstanceListResponse>(response);
 }
 
 export async function getInstance(instanceId: string): Promise<InstanceDetailResponse> {
-  const response = await fetch(`/api/instances/${instanceId}`);
+  const response = await apiFetch(`/api/instances/${instanceId}`);
   return readJson<InstanceDetailResponse>(response);
 }
 
 export async function getInstanceRuntimeEvents(instanceId: string): Promise<InstanceRuntimeEventsResponse> {
-  const response = await fetch(`/api/instances/${instanceId}/events`);
+  const response = await apiFetch(`/api/instances/${instanceId}/events`);
   return readJson<InstanceRuntimeEventsResponse>(response);
 }
 
 export async function getInstanceAddons(instanceId: string): Promise<InstanceAddonListResponse> {
-  const response = await fetch(`/api/instances/${instanceId}/addons`);
+  const response = await apiFetch(`/api/instances/${instanceId}/addons`);
   return readJson<InstanceAddonListResponse>(response);
 }
 
 export async function getAddonLibrary(): Promise<AddonLibraryListResponse> {
-  const response = await fetch("/api/addons/library");
+  const response = await apiFetch("/api/addons/library");
   return readJson<AddonLibraryListResponse>(response);
 }
 
 export async function deleteAddonFromLibrary(addonFileId: string): Promise<{ success: true }> {
-  const response = await fetch(`/api/addons/library/${addonFileId}`, {
+  const response = await apiFetch(`/api/addons/library/${addonFileId}`, {
     method: "DELETE",
   });
   return readJson<{ success: true }>(response);
 }
 
 export async function getAddonUpdateSettings(): Promise<AddonUpdateSettingsResponse> {
-  const response = await fetch("/api/addons/settings");
+  const response = await apiFetch("/api/addons/settings");
   return readJson<AddonUpdateSettingsResponse>(response);
 }
 
 export async function updateAddonUpdateSettings(
   payload: UpdateAddonUpdateSettingsRequest,
 ): Promise<AddonUpdateSettingsResponse> {
-  const response = await fetch("/api/addons/settings", {
+  const response = await apiFetch("/api/addons/settings", {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -242,7 +262,7 @@ export async function updateAddonUpdateSettings(
 }
 
 export async function getAddonLibraryEditor(addonFileId: string): Promise<AddonLibraryEditorResponse> {
-  const response = await fetch(`/api/addons/library/${addonFileId}/editor`);
+  const response = await apiFetch(`/api/addons/library/${addonFileId}/editor`);
   return readJson<AddonLibraryEditorResponse>(response);
 }
 
@@ -250,7 +270,7 @@ export async function updateAddonLibraryLinks(
   addonFileId: string,
   payload: UpdateAddonLibraryLinksRequest,
 ): Promise<AddonLibraryEditorResponse> {
-  const response = await fetch(`/api/addons/library/${addonFileId}/editor`, {
+  const response = await apiFetch(`/api/addons/library/${addonFileId}/editor`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -262,7 +282,7 @@ export async function selectInstanceLibraryAddons(
   instanceId: string,
   addonFileIds: string[],
 ): Promise<InstanceAddonListResponse> {
-  const response = await fetch(`/api/instances/${instanceId}/addons/library`, {
+  const response = await apiFetch(`/api/instances/${instanceId}/addons/library`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ addonFileIds }),
@@ -274,7 +294,7 @@ export async function updateInstanceAddonOrder(
   instanceId: string,
   payload: UpdateInstanceAddonOrderRequest,
 ): Promise<InstanceAddonListResponse> {
-  const response = await fetch(`/api/instances/${instanceId}/addons/order`, {
+  const response = await apiFetch(`/api/instances/${instanceId}/addons/order`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -283,26 +303,26 @@ export async function updateInstanceAddonOrder(
 }
 
 export async function autoSortInstanceAddons(instanceId: string): Promise<InstanceAddonListResponse> {
-  const response = await fetch(`/api/instances/${instanceId}/addons/auto-sort`, {
+  const response = await apiFetch(`/api/instances/${instanceId}/addons/auto-sort`, {
     method: "POST",
   });
   return readJson<InstanceAddonListResponse>(response);
 }
 
 export async function getInstanceAddonDetail(instanceId: string, addonId: string): Promise<InstanceAddonDetailResponse> {
-  const response = await fetch(`/api/instances/${instanceId}/addons/${addonId}`);
+  const response = await apiFetch(`/api/instances/${instanceId}/addons/${addonId}`);
   return readJson<InstanceAddonDetailResponse>(response);
 }
 
 export async function getCurseForgeAddonProviderStatus(
   instanceId: string,
 ): Promise<CurseForgeAddonProviderStatusResponse> {
-  const response = await fetch(`/api/instances/${instanceId}/addons/providers/curseforge/status`);
+  const response = await apiFetch(`/api/instances/${instanceId}/addons/providers/curseforge/status`);
   return readJson<CurseForgeAddonProviderStatusResponse>(response);
 }
 
 export async function getLibraryCurseForgeAddonProviderStatus(): Promise<CurseForgeAddonProviderStatusResponse> {
-  const response = await fetch("/api/addons/providers/curseforge/status");
+  const response = await apiFetch("/api/addons/providers/curseforge/status");
   return readJson<CurseForgeAddonProviderStatusResponse>(response);
 }
 
@@ -319,7 +339,7 @@ export async function searchCurseForgeAddons(
   if (payload.authorId) params.set("authorId", String(payload.authorId));
 
   const query = params.toString();
-  const response = await fetch(
+  const response = await apiFetch(
     `/api/instances/${instanceId}/addons/providers/curseforge/search${query ? `?${query}` : ""}`,
   );
   return readJson<CurseForgeAddonSearchResponse>(response);
@@ -337,7 +357,7 @@ export async function searchLibraryCurseForgeAddons(
   if (payload.authorId) params.set("authorId", String(payload.authorId));
 
   const query = params.toString();
-  const response = await fetch(`/api/addons/providers/curseforge/search${query ? `?${query}` : ""}`);
+  const response = await apiFetch(`/api/addons/providers/curseforge/search${query ? `?${query}` : ""}`);
   return readJson<CurseForgeAddonSearchResponse>(response);
 }
 
@@ -345,7 +365,7 @@ export async function downloadCurseForgeAddon(
   instanceId: string,
   payload: CurseForgeAddonDownloadRequest,
 ): Promise<InstanceAddonDetailResponse> {
-  const response = await fetch(`/api/instances/${instanceId}/addons/providers/curseforge/download`, {
+  const response = await apiFetch(`/api/instances/${instanceId}/addons/providers/curseforge/download`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -357,7 +377,7 @@ export async function downloadCurseForgeAddon(
 export async function downloadCurseForgeAddonToLibrary(
   payload: CurseForgeAddonDownloadRequest,
 ): Promise<AddonLibraryDownloadResponse> {
-  const response = await fetch("/api/addons/providers/curseforge/download", {
+  const response = await apiFetch("/api/addons/providers/curseforge/download", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -367,21 +387,21 @@ export async function downloadCurseForgeAddonToLibrary(
 }
 
 export async function enableInstanceAddon(instanceId: string, addonId: string): Promise<InstanceAddonDetailResponse> {
-  const response = await fetch(`/api/instances/${instanceId}/addons/${addonId}/enable`, {
+  const response = await apiFetch(`/api/instances/${instanceId}/addons/${addonId}/enable`, {
     method: "POST",
   });
   return readJson<InstanceAddonDetailResponse>(response);
 }
 
 export async function disableInstanceAddon(instanceId: string, addonId: string): Promise<InstanceAddonDetailResponse> {
-  const response = await fetch(`/api/instances/${instanceId}/addons/${addonId}/disable`, {
+  const response = await apiFetch(`/api/instances/${instanceId}/addons/${addonId}/disable`, {
     method: "POST",
   });
   return readJson<InstanceAddonDetailResponse>(response);
 }
 
 export async function createInstance(payload: CreateInstanceRequest): Promise<InstanceDetailResponse> {
-  const response = await fetch("/api/instances", {
+  const response = await apiFetch("/api/instances", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -391,7 +411,7 @@ export async function createInstance(payload: CreateInstanceRequest): Promise<In
 }
 
 export async function updateInstance(instanceId: string, payload: UpdateInstanceRequest): Promise<InstanceDetailResponse> {
-  const response = await fetch(`/api/instances/${instanceId}`, {
+  const response = await apiFetch(`/api/instances/${instanceId}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -401,7 +421,7 @@ export async function updateInstance(instanceId: string, payload: UpdateInstance
 }
 
 export async function deleteInstance(instanceId: string): Promise<{ success: true }> {
-  const response = await fetch(`/api/instances/${instanceId}`, {
+  const response = await apiFetch(`/api/instances/${instanceId}`, {
     method: "DELETE",
   });
 
@@ -409,12 +429,12 @@ export async function deleteInstance(instanceId: string): Promise<{ success: tru
 }
 
 export async function getInstanceSettings(instanceId: string): Promise<InstanceSettingsResponse> {
-  const response = await fetch(`/api/instances/${instanceId}/settings`);
+  const response = await apiFetch(`/api/instances/${instanceId}/settings`);
   return readJson<InstanceSettingsResponse>(response);
 }
 
 export async function getInstanceServerProperties(instanceId: string): Promise<InstanceServerPropertiesResponse> {
-  const response = await fetch(`/api/instances/${instanceId}/server-properties`);
+  const response = await apiFetch(`/api/instances/${instanceId}/server-properties`);
   return readJson<InstanceServerPropertiesResponse>(response);
 }
 
@@ -422,7 +442,7 @@ export async function updateInstanceServerProperties(
   instanceId: string,
   payload: UpdateInstanceServerPropertiesRequest,
 ): Promise<InstanceServerPropertiesResponse> {
-  const response = await fetch(`/api/instances/${instanceId}/server-properties`, {
+  const response = await apiFetch(`/api/instances/${instanceId}/server-properties`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -432,22 +452,22 @@ export async function updateInstanceServerProperties(
 }
 
 export async function getInstanceBdsStatus(instanceId: string): Promise<InstanceBdsStatusResponse> {
-  const response = await fetch(`/api/instances/${instanceId}/bds/status`);
+  const response = await apiFetch(`/api/instances/${instanceId}/bds/status`);
   return readJson<InstanceBdsStatusResponse>(response);
 }
 
 export async function getInstanceBdsRuntime(instanceId: string): Promise<InstanceBdsRuntimeResponse> {
-  const response = await fetch(`/api/instances/${instanceId}/bds/runtime`);
+  const response = await apiFetch(`/api/instances/${instanceId}/bds/runtime`);
   return readJson<InstanceBdsRuntimeResponse>(response);
 }
 
 export async function getInstanceBdsLogFiles(instanceId: string): Promise<InstanceBdsLogListResponse> {
-  const response = await fetch(`/api/instances/${instanceId}/bds/logs`);
+  const response = await apiFetch(`/api/instances/${instanceId}/bds/logs`);
   return readJson<InstanceBdsLogListResponse>(response);
 }
 
 export async function getInstanceCurrentBdsLogTail(instanceId: string, limit = 200): Promise<InstanceBdsLogTailResponse> {
-  const response = await fetch(`/api/instances/${instanceId}/bds/logs/current/tail?limit=${limit}`);
+  const response = await apiFetch(`/api/instances/${instanceId}/bds/logs/current/tail?limit=${limit}`);
   return readJson<InstanceBdsLogTailResponse>(response);
 }
 
@@ -458,35 +478,35 @@ export async function getInstanceBdsLogPage(
 ): Promise<InstanceBdsLogPageResponse> {
   const offset = options?.offset ?? 0;
   const limit = options?.limit ?? 200;
-  const response = await fetch(
+  const response = await apiFetch(
     `/api/instances/${instanceId}/bds/logs/${encodeURIComponent(fileName)}?offset=${offset}&limit=${limit}`,
   );
   return readJson<InstanceBdsLogPageResponse>(response);
 }
 
 export async function startInstanceBds(instanceId: string): Promise<InstanceBdsRuntimeResponse> {
-  const response = await fetch(`/api/instances/${instanceId}/bds/start`, {
+  const response = await apiFetch(`/api/instances/${instanceId}/bds/start`, {
     method: "POST",
   });
   return readJson<InstanceBdsRuntimeResponse>(response);
 }
 
 export async function stopInstanceBds(instanceId: string): Promise<InstanceBdsRuntimeResponse> {
-  const response = await fetch(`/api/instances/${instanceId}/bds/stop`, {
+  const response = await apiFetch(`/api/instances/${instanceId}/bds/stop`, {
     method: "POST",
   });
   return readJson<InstanceBdsRuntimeResponse>(response);
 }
 
 export async function restartInstanceBds(instanceId: string): Promise<InstanceBdsRuntimeResponse> {
-  const response = await fetch(`/api/instances/${instanceId}/bds/restart`, {
+  const response = await apiFetch(`/api/instances/${instanceId}/bds/restart`, {
     method: "POST",
   });
   return readJson<InstanceBdsRuntimeResponse>(response);
 }
 
 export async function manualUpdateInstanceBds(instanceId: string): Promise<InstanceBdsManualUpdateResponse> {
-  const response = await fetch(`/api/instances/${instanceId}/bds/update`, {
+  const response = await apiFetch(`/api/instances/${instanceId}/bds/update`, {
     method: "POST",
   });
   return readJson<InstanceBdsManualUpdateResponse>(response);
@@ -496,7 +516,7 @@ export async function sendInstanceConsoleCommand(
   instanceId: string,
   payload: InstanceBdsConsoleCommandRequest,
 ): Promise<InstanceBdsConsoleCommandResponse> {
-  const response = await fetch(`/api/instances/${instanceId}/bds/console/commands`, {
+  const response = await apiFetch(`/api/instances/${instanceId}/bds/console/commands`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -506,7 +526,7 @@ export async function sendInstanceConsoleCommand(
 }
 
 export async function createExportBackup(instanceId: string): Promise<InstanceBackupResponse> {
-  const response = await fetch(`/api/instances/${instanceId}/backups/export`, {
+  const response = await apiFetch(`/api/instances/${instanceId}/backups/export`, {
     method: "POST",
   });
   return readJson<InstanceBackupResponse>(response);
@@ -515,7 +535,7 @@ export async function createExportBackup(instanceId: string): Promise<InstanceBa
 export async function importInstanceBackup(file: File): Promise<InstanceBackupImportResponse> {
   const body = new FormData();
   body.append("backup", file);
-  const response = await fetch("/api/instances/backups/import", {
+  const response = await apiFetch("/api/instances/backups/import", {
     method: "POST",
     body,
   });
@@ -527,7 +547,7 @@ export async function linkRestoredInstanceAddonToLibrary(
   addonId: string,
   addonFileId: string,
 ): Promise<InstanceAddonListResponse> {
-  const response = await fetch(`/api/instances/${instanceId}/addons/${addonId}/link-library`, {
+  const response = await apiFetch(`/api/instances/${instanceId}/addons/${addonId}/link-library`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ addonFileId }),
@@ -536,27 +556,27 @@ export async function linkRestoredInstanceAddonToLibrary(
 }
 
 export async function getLatestBdsVersion(): Promise<LatestBdsVersionResponse> {
-  const response = await fetch("/api/bds/latest");
+  const response = await apiFetch("/api/bds/latest");
   return readJson<LatestBdsVersionResponse>(response);
 }
 
 export async function checkInstanceBdsUpdates(instanceId: string): Promise<InstanceBdsCheckUpdatesResponse> {
-  const response = await fetch(`/api/instances/${instanceId}/bds/check-updates`, {
+  const response = await apiFetch(`/api/instances/${instanceId}/bds/check-updates`, {
     method: "POST",
   });
 
   return readJson<InstanceBdsCheckUpdatesResponse>(response);
 }
 export async function getAddonUpdateSummary(): Promise<AddonUpdateSummary> {
-  return readJson<AddonUpdateSummary>(await fetch("/api/addons/updates"));
+  return readJson<AddonUpdateSummary>(await apiFetch("/api/addons/updates"));
 }
 
 export async function checkAddonLibraryUpdates(): Promise<AddonUpdateSummary> {
-  return readJson<AddonUpdateSummary>(await fetch("/api/addons/updates/check", { method: "POST" }));
+  return readJson<AddonUpdateSummary>(await apiFetch("/api/addons/updates/check", { method: "POST" }));
 }
 
 export async function retryInstanceAddonUpdate(instanceId: string, addonId: string): Promise<AddonUpdateSummary> {
-  return readJson<AddonUpdateSummary>(await fetch(`/api/instances/${encodeURIComponent(instanceId)}/addons/updates/${encodeURIComponent(addonId)}/retry`, {
+  return readJson<AddonUpdateSummary>(await apiFetch(`/api/instances/${encodeURIComponent(instanceId)}/addons/updates/${encodeURIComponent(addonId)}/retry`, {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ confirmed: true }),
   }));
 }

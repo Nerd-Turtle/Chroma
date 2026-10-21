@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { AuthUser } from "../../shared/types/index.js";
-import { getSession, getSetupStatus, logout } from "./api/chromaApi.js";
+import { ApiRequestError, getSession, getSetupStatus, logout, SESSION_EXPIRED_EVENT } from "./api/chromaApi.js";
+import { useSessionActivity } from "./components/useSessionActivity.js";
 import TopNav from "./components/TopNav.js";
 import Tooltip from "./components/Tooltip.js";
 import AddonLibraryPage from "./pages/AddonLibraryPage.js";
@@ -51,9 +52,27 @@ function syncWorkspaceHash(page: "dashboard" | "instances" | "addon-library" | "
 const App = () => {
   const [page, setPage] = useState<AppPage>("login");
   const [loading, setLoading] = useState(true);
+  const [initializationError, setInitializationError] = useState("");
   const [user, setUser] = useState<AuthUser | null>(null);
   const [addonLibraryQuery, setAddonLibraryQuery] = useState("");
   const [addonLibrarySyncContext, setAddonLibrarySyncContext] = useState<AddonLibrarySyncContext>(null);
+
+  const showLogin = useCallback(() => {
+    setUser(null);
+    setPage("login");
+    setLoading(false);
+    setInitializationError("");
+    setAddonLibraryQuery("");
+    setAddonLibrarySyncContext(null);
+    if (window.location.hash) {
+      window.history.replaceState(null, "", window.location.pathname + window.location.search);
+    }
+  }, []);
+
+  useEffect(() => {
+    window.addEventListener(SESSION_EXPIRED_EVENT, showLogin);
+    return () => window.removeEventListener(SESSION_EXPIRED_EVENT, showLogin);
+  }, [showLogin]);
 
   useEffect(() => {
     async function initializeApp() {
@@ -71,14 +90,19 @@ const App = () => {
         setAddonLibraryQuery(getAddonLibraryQueryFromHash());
         setAddonLibrarySyncContext(getAddonLibrarySyncContextFromHash());
       } else {
-        setPage("login");
+        showLogin();
       }
 
       setLoading(false);
     }
 
-    void initializeApp();
-  }, []);
+    void initializeApp().catch((error: unknown) => {
+      if (error instanceof ApiRequestError && error.status === 401) showLogin();
+      else setInitializationError(error instanceof Error ? error.message : "Unable to connect to Chroma.");
+    });
+  }, [showLogin]);
+
+  useSessionActivity(user !== null, showLogin);
 
   useEffect(() => {
     function handleHashChange() {
@@ -100,11 +124,7 @@ const App = () => {
 
   const handleLogout = async () => {
     await logout();
-    setUser(null);
-    setPage("login");
-    if (window.location.hash) {
-      window.history.replaceState(null, "", window.location.pathname + window.location.search);
-    }
+    showLogin();
   };
 
   const isAuthenticated = user !== null && page !== "setup" && page !== "login";
@@ -135,7 +155,10 @@ const App = () => {
                 : "page-frame"
         }
       >
-        {loading ? <section className="page-panel">Loading Chroma...</section> : null}
+        {loading ? <section className="page-panel">{initializationError ? <>
+          <p className="form-error" role="alert">{initializationError}</p>
+          <button type="button" className="secondary-button" onClick={() => window.location.reload()}>Retry connection</button>
+        </> : "Loading Chroma..."}</section> : null}
         {!loading && page === "setup" ? <SetupPage onSetupComplete={() => setPage("login")} /> : null}
         {!loading && page === "login" ? <LoginPage onLoginSuccess={(nextUser: AuthUser) => {
           setUser(nextUser);

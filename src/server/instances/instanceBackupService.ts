@@ -160,6 +160,8 @@ async function writeZipFromDirectory(sourceDir: string, zipPath: string): Promis
 }
 
 function safeArchivePath(destination: string, entryName: string): string {
+  // CWE-22: backup manifests and ZIP entry names cannot choose paths outside staging.
+  // https://cwe.mitre.org/data/definitions/22.html
   const normalized = normalize(entryName);
   if (normalized === "" || isAbsolute(normalized) || normalized.startsWith("..")) {
     throw new Error("Backup archive contains an invalid path.");
@@ -293,6 +295,8 @@ function sleep(ms: number): Promise<void> {
 }
 
 export async function createInternalRevertBackup(db: Database, instanceId: string): Promise<InstanceBackupRecord> {
+  // CIS Control 11 (Data Recovery): keep a recovery copy before changing worlds/configuration.
+  // https://www.cisecurity.org/controls/data-recovery
   const instance = getInstance(db, instanceId);
   if (!instance) {
     throw new Error("Instance not found");

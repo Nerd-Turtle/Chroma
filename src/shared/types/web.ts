@@ -51,6 +51,7 @@ export type UpdateAppSettingsRequest = {
   timezone: string;
   language: string;
   notificationDurationSeconds: number;
+  sessionIdleTimeoutMinutes?: number;
   curseForgeApiKey?: string;
   clearCurseForgeApiKey?: boolean;
 };

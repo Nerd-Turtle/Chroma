@@ -1,5 +1,5 @@
 import { runInstanceMutation } from "../instances/addonUpdateControl.js";
-import { chmod, mkdir, stat } from "node:fs/promises";
+import { chmod, lstat, mkdir, stat } from "node:fs/promises";
 import { dirname, isAbsolute, join, normalize, sep } from "node:path";
 import yauzl from "yauzl";
 import type { Database } from "better-sqlite3";
@@ -110,11 +110,25 @@ async function validateBdsInstall(instance: Instance): Promise<void> {
   await chmod(bdsPath, 0o755);
 }
 
-async function installBdsForInstanceUnlocked(db: Database, instanceId: string): Promise<BdsInstall> {
+async function installBdsForInstanceUnlocked(db: Database, instanceId: string, managedUpdate = false): Promise<BdsInstall> {
   const instance = getInstance(db, instanceId);
 
   if (!instance) {
     throw new Error("Instance not found");
+  }
+
+  if (!managedUpdate) {
+    // CWE-367 / CWE-841: enforce this under the instance mutation lock, before any writes.
+    // Existing installations must use the managed backup/install/config-restore flow.
+    // https://cwe.mitre.org/data/definitions/367.html
+    // https://cwe.mitre.org/data/definitions/841.html
+    const installed = getBdsInstall(db, instanceId);
+    let executableExists = false;
+    try { await lstat(join(getBdsInstallPath(instance), BDS_EXECUTABLE_NAME)); executableExists = true; }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+    if (installed?.status === "installed" || installed?.installedAt || executableExists) {
+      throw new Error("BDS is already installed. Use the managed update operation to preserve configuration and backups.");
+    }
   }
 
   const now = new Date().toISOString();
@@ -204,4 +218,12 @@ export async function installBdsForInstance(db: Database, instanceId: string): P
   const instance = getInstance(db, instanceId);
   if (!instance) throw new Error("Instance not found");
   return runInstanceMutation(instance, () => installBdsForInstanceUnlocked(db, instanceId));
+}
+
+// Internal managed-update entry point; API install requests cannot opt into replacement.
+// The caller creates a revert backup first and restores customized configuration afterward.
+export async function installBdsForManagedUpdate(db: Database, instanceId: string): Promise<BdsInstall> {
+  const instance = getInstance(db, instanceId);
+  if (!instance) throw new Error("Instance not found");
+  return runInstanceMutation(instance, () => installBdsForInstanceUnlocked(db, instanceId, true));
 }

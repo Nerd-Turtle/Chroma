@@ -4,7 +4,8 @@ import { mkdir, rm } from "node:fs/promises";
 import { downloadAddonFile, runAddonProjectDownload } from "./addonDownloadService.js";
 import { existsSync } from "node:fs";
 import { relative, resolve, sep } from "node:path";
-import type { AddonLibraryItem, AddonLibraryLinkedInstance, CurseForgeAddonSearchResult, InstanceAddon, InstanceAddonPack } from "../../shared/types/index.js";
+import type { AddonLibraryItem, AddonLibraryLinkedInstance, AddonReleaseChannel, CurseForgeAddonSearchResult, InstanceAddon, InstanceAddonPack } from "../../shared/types/index.js";
+import { isAllowedAddonRelease } from "./addonReleasePolicy.js";
 import { createId } from "../utils/createId.js";
 import { getRuntimePaths } from "../config/paths.js";
 import { getInstance, listInstances } from "../instances/instanceService.js";
@@ -510,7 +511,7 @@ async function selectLibraryAddonsForInstanceUnlocked(
 export type DownloadCurseForgeAddonInput = {
   projectId: number;
   fileId?: number;
-  stableOnly?: boolean;
+  releaseChannel?: AddonReleaseChannel;
 };
 
 type InspectedCurseForgeAddonPack = {
@@ -556,10 +557,10 @@ function selectCurseForgeReleaseFiles(
   mod: CurseForgeMod,
   files: CurseForgeModFile[],
   requestedFileId: number | undefined,
-  stableOnly = false,
+  releaseChannel?: AddonReleaseChannel,
 ): { releaseFileId: number; files: CurseForgeModFile[] } {
   const installableFiles = files
-    .filter((file) => !stableOnly || (file.releaseType === 1 && file.isAvailable === true))
+    .filter((file) => !releaseChannel || isAllowedAddonRelease(file, releaseChannel))
     .filter((file) => file.isAvailable !== false)
     .filter(isBedrockAddonArchive)
     .sort(compareCurseForgeFileDateDesc);
@@ -583,6 +584,7 @@ function selectCurseForgeReleaseFiles(
   const anchorVersionTokens = new Set(getFileVersionTokens(anchor));
   const releaseFiles = installableFiles.filter((file) => {
     if (file.id === anchor.id) return true;
+    if (releaseChannel && file.releaseType !== anchor.releaseType) return false;
     if (getFileDay(file) !== anchorDay) return false;
 
     const fileVersionTokens = getFileVersionTokens(file);
@@ -644,7 +646,7 @@ async function fetchCurseForgeAddonProject(db: Database, input: DownloadCurseFor
     client.getMod(input.projectId),
     client.getModFiles(input.projectId),
   ]);
-  const selectedRelease = selectCurseForgeReleaseFiles(mod, projectFiles, input.fileId, input.stableOnly);
+  const selectedRelease = selectCurseForgeReleaseFiles(mod, projectFiles, input.fileId, input.releaseChannel);
   const releasePaths = getCurseForgeAddonReleaseStoragePaths(input.projectId, selectedRelease.releaseFileId);
   const downloadedFiles: DownloadedCurseForgeAddonFile[] = [];
   const discoveredPacks: InspectedCurseForgeAddonPack[] = [];

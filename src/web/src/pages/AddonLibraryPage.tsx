@@ -9,8 +9,10 @@ import type {
   AddonLibraryItem,
   AddonLibraryLinkedInstance,
   AddonUpdateSettings,
+  AddonUpdateSummary,
 } from "../../../shared/types/index.js";
 import {
+  checkAddonLibraryUpdates,
   deleteAddonFromLibrary,
   disableInstanceAddon,
   downloadCurseForgeAddonToLibrary,
@@ -18,6 +20,7 @@ import {
   getAddonLibraryEditor,
   getAddonLibrary,
   getAddonUpdateSettings,
+  getAddonUpdateSummary,
   getLibraryCurseForgeAddonProviderStatus,
   linkRestoredInstanceAddonToLibrary,
   searchLibraryCurseForgeAddons,
@@ -25,7 +28,6 @@ import {
   updateAddonUpdateSettings,
 } from "../api/chromaApi.js";
 import { useNotificationDurationMs } from "../components/useNotificationDurationMs.js";
-import AddonUpdatesPanel from "../components/AddonUpdatesPanel.js";
 
 type CurseForgeSearchState = {
   results: CurseForgeAddonSearchResult[];
@@ -41,6 +43,8 @@ type BannerState = {
   tone: BannerTone;
 };
 
+type AddonUpdateWarning = { id: string; message: string };
+
 type AddonLibraryEditorState = {
   addon: AddonLibraryItem;
   instances: AddonLibraryLinkedInstance[];
@@ -48,6 +52,21 @@ type AddonLibraryEditorState = {
 
 type AddonLibraryTab = "browse" | "downloaded";
 const CURSEFORGE_SEARCH_PAGE_SIZE = 50;
+
+function getAddonUpdateCompletionBanner(summary: AddonUpdateSummary): BannerState {
+  if (summary.checkError) {
+    return { tone: "error", message: `Addon update service failed: ${summary.checkError}` };
+  }
+
+  const checkedCount = summary.checks.length;
+  const downloadedCount = summary.checks.filter((check) => check.state === "downloaded").length;
+  return {
+    tone: "info",
+    message: checkedCount > 0
+      ? `Addon update service completed. Checked ${checkedCount} addon${checkedCount === 1 ? "" : "s"}; downloaded ${downloadedCount} update${downloadedCount === 1 ? "" : "s"}.`
+      : "Addon update service completed. No downloaded CurseForge addons to check.",
+  };
+}
 
 function formatLabel(value: string): string {
   return value
@@ -149,10 +168,13 @@ const AddonLibraryPage = ({
   const [activeTab, setActiveTab] = useState<AddonLibraryTab>("browse");
   const [error, setError] = useState("");
   const [banner, setBanner] = useState<BannerState | null>(null);
+  const [addonUpdateWarnings, setAddonUpdateWarnings] = useState<AddonUpdateWarning[]>([]);
   const [addonUpdateSettings, setAddonUpdateSettings] = useState<AddonUpdateSettings | null>(null);
+  const [addonUpdateSettingsDraft, setAddonUpdateSettingsDraft] = useState<AddonUpdateSettings | null>(null);
   const [addonUpdateSettingsLoading, setAddonUpdateSettingsLoading] = useState(true);
   const [addonUpdateSettingsSaving, setAddonUpdateSettingsSaving] = useState(false);
   const [addonUpdateEditorOpen, setAddonUpdateEditorOpen] = useState(false);
+  const [checkingAddonUpdates, setCheckingAddonUpdates] = useState(false);
   const [editingAddonId, setEditingAddonId] = useState("");
   const [addonEditorData, setAddonEditorData] = useState<AddonLibraryEditorState | null>(null);
   const [addonEditorLoading, setAddonEditorLoading] = useState(false);
@@ -163,6 +185,7 @@ const AddonLibraryPage = ({
   const resultsAnchorRef = useRef<HTMLDivElement | null>(null);
   const searchResultsRef = useRef<HTMLDivElement | null>(null);
   const appliedInitialQueryRef = useRef("");
+  const reportedAddonCheckRef = useRef<string | null | undefined>(undefined);
   const notificationDurationMs = useNotificationDurationMs();
 
   const canBrowse = providerStatus?.resolved === true;
@@ -205,6 +228,33 @@ const AddonLibraryPage = ({
     }, 15_000);
     return () => { active = false; window.clearInterval(timer); };
   }, [activeTab]);
+
+  function presentAddonUpdateResults(summary: AddonUpdateSummary) {
+    reportedAddonCheckRef.current = summary.lastCheckedAt;
+    setBanner(getAddonUpdateCompletionBanner(summary));
+    setAddonUpdateWarnings(summary.checks
+      .filter((check) => check.state === "review" || check.state === "error")
+      .map((check) => ({ id: check.projectId, message: `${check.name}: ${check.message}` })));
+  }
+
+  useEffect(() => {
+    if (activeTab !== "downloaded" || checkingAddonUpdates) return;
+    let active = true;
+    async function refreshUpdateStatus() {
+      try {
+        const summary = await getAddonUpdateSummary();
+        if (!active) return;
+        const reportedAt = reportedAddonCheckRef.current;
+        if (reportedAt === undefined) reportedAddonCheckRef.current = summary.lastCheckedAt;
+        else if (summary.lastCheckedAt && (!reportedAt || Date.parse(summary.lastCheckedAt) > Date.parse(reportedAt))) {
+          presentAddonUpdateResults(summary);
+        }
+      } catch { /* A temporary status polling failure does not change the service result. */ }
+    }
+    void refreshUpdateStatus();
+    const timer = window.setInterval(() => void refreshUpdateStatus(), 15_000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [activeTab, checkingAddonUpdates]);
 
   useEffect(() => {
     async function loadProviderStatus() {
@@ -257,7 +307,7 @@ const AddonLibraryPage = ({
   }, [completedDownloadProjectId]);
 
   useEffect(() => {
-    if (!banner) {
+    if (!banner || banner.tone !== "info") {
       return;
     }
 
@@ -538,7 +588,7 @@ const AddonLibraryPage = ({
   async function handleSaveAddonUpdateSettings(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    if (!addonUpdateSettings) {
+    if (!addonUpdateSettingsDraft) {
       return;
     }
 
@@ -547,7 +597,7 @@ const AddonLibraryPage = ({
     setBanner(null);
 
     try {
-      const result = await updateAddonUpdateSettings(addonUpdateSettings);
+      const result = await updateAddonUpdateSettings(addonUpdateSettingsDraft);
       setAddonUpdateSettings(result.settings);
       setAddonUpdateEditorOpen(false);
       setBanner({
@@ -570,6 +620,35 @@ const AddonLibraryPage = ({
       setAddonUpdateSettings(result.settings);
     } catch (failure) { setError(failure instanceof Error ? failure.message : "Unable to save automatic downloads."); }
     finally { setAddonUpdateSettingsSaving(false); }
+  }
+
+  async function handleCheckAddonUpdates() {
+    if (checkingAddonUpdates) return;
+    setCheckingAddonUpdates(true);
+    setError("");
+    setBanner(null);
+    setAddonUpdateWarnings([]);
+
+    try {
+      const result = await checkAddonLibraryUpdates();
+      presentAddonUpdateResults(result);
+      try {
+        const library = await getAddonLibrary();
+        setLibraryAddons(library.addons);
+      } catch (failure) {
+        setAddonUpdateWarnings((current) => [...current, {
+          id: "library-refresh",
+          message: `The downloaded list could not be refreshed: ${failure instanceof Error ? failure.message : "Try reloading the page."}`,
+        }]);
+      }
+    } catch (failure) {
+      setBanner({
+        tone: "error",
+        message: `Addon update service failed: ${failure instanceof Error ? failure.message : "Unable to check for addon updates."}`,
+      });
+    } finally {
+      setCheckingAddonUpdates(false);
+    }
   }
 
   const totalSearchPages = search.pagination ? Math.max(1, Math.ceil(search.pagination.totalCount / search.pagination.pageSize)) : 1;
@@ -605,6 +684,19 @@ const AddonLibraryPage = ({
             </button>
           </div>
         ) : null}
+        {addonUpdateWarnings.map((warning) => (
+          <div key={warning.id} className="status-banner status-banner-warning" role="alert">
+            <span>{warning.message}</span>
+            <button
+              type="button"
+              className="status-banner-close"
+              onClick={() => setAddonUpdateWarnings((current) => current.filter((item) => item.id !== warning.id))}
+              aria-label={`Dismiss warning: ${warning.message}`}
+            >
+              Close
+            </button>
+          </div>
+        ))}
       </div>
 
       <nav className="addon-library-tabs" aria-label="Addon Library sections">
@@ -632,25 +724,37 @@ const AddonLibraryPage = ({
               type="button"
               className={addonUpdateSettings.automaticChecksEnabled ? "toggle-switch active" : "toggle-switch"}
               aria-label="Toggle automatic addon update downloads"
-              data-tooltip="Download stable addon updates on the library schedule"
+              data-tooltip="Download addon updates on the library schedule using the selected release channel"
               aria-pressed={addonUpdateSettings.automaticChecksEnabled}
               onClick={() => void toggleAutomaticDownloads()}
               disabled={addonUpdateSettingsSaving}
             >
               <span className="toggle-switch-thumb" />
             </button>
-            {addonUpdateSettings.automaticChecksEnabled ? (
-              <button
-                type="button"
-                className="icon-action"
-                onClick={() => setAddonUpdateEditorOpen(true)}
-                disabled={addonUpdateSettingsSaving}
-                aria-label="Edit addon update schedule"
-                data-tooltip="Edit addon update schedule"
-              >
-                <Pencil aria-hidden="true" />
-              </button>
-            ) : null}
+            <button
+              type="button"
+              className="icon-action"
+              onClick={() => {
+                setAddonUpdateSettingsDraft({ ...addonUpdateSettings });
+                setAddonUpdateEditorOpen(true);
+              }}
+              disabled={addonUpdateSettingsSaving}
+              aria-label="Edit addon update settings"
+              data-tooltip="Edit addon update settings"
+            >
+              <Pencil aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              className="icon-action"
+              onClick={() => void handleCheckAddonUpdates()}
+              disabled={checkingAddonUpdates}
+              aria-label="Check for updates now"
+              data-tooltip="Check for updates now"
+              aria-busy={checkingAddonUpdates}
+            >
+              {checkingAddonUpdates ? <LoaderCircle className="icon-action-spinner" aria-hidden="true" /> : <RefreshCw aria-hidden="true" />}
+            </button>
           </div>
         ) : null}
       </nav>
@@ -840,7 +944,6 @@ const AddonLibraryPage = ({
 
       {activeTab === "downloaded" ? (
         <section className="addon-library-section addon-library-section-downloaded">
-          <AddonUpdatesPanel onLibraryChanged={() => void loadLibrary()} />
           {libraryAddons.length === 0 ? (
             <p className="muted-copy">No addons have been downloaded yet.</p>
           ) : (
@@ -1050,12 +1153,12 @@ const AddonLibraryPage = ({
         </div>
       ) : null}
 
-      {addonUpdateEditorOpen && addonUpdateSettings ? (
+      {addonUpdateEditorOpen && addonUpdateSettingsDraft ? (
         <div className="instance-editor-drawer-layer">
           <button
             type="button"
             className="instance-editor-drawer-backdrop"
-            aria-label="Close addon update schedule editor"
+            aria-label="Close addon update settings editor"
             onClick={() => {
               if (!addonUpdateSettingsSaving) {
                 setAddonUpdateEditorOpen(false);
@@ -1066,7 +1169,7 @@ const AddonLibraryPage = ({
             <div className="instance-editor-drawer-header">
               <div>
                 <p className="eyebrow">Addon Updates</p>
-                <h3>Schedule</h3>
+                <h3>Update settings</h3>
               </div>
             </div>
 
@@ -1074,11 +1177,26 @@ const AddonLibraryPage = ({
               <div className="instance-editor-fields">
                 <div className="instances-schedule-grid">
                   <label>
+                    Allowed releases
+                    <select
+                      value={addonUpdateSettingsDraft.releaseChannel}
+                      onChange={(event) => setAddonUpdateSettingsDraft((current) => current ? {
+                        ...current,
+                        releaseChannel: event.target.value as AddonUpdateSettings["releaseChannel"],
+                      } : current)}
+                      disabled={addonUpdateSettingsSaving}
+                    >
+                      <option value="stable">Stable only</option>
+                      <option value="beta">Stable + Beta</option>
+                      <option value="alpha">Stable + Beta + Alpha</option>
+                    </select>
+                  </label>
+                  <label>
                     Check for updates
                     <select
-                      value={addonUpdateSettings.updateCheckFrequency}
+                      value={addonUpdateSettingsDraft.updateCheckFrequency}
                       onChange={(event) =>
-                        setAddonUpdateSettings((current) =>
+                        setAddonUpdateSettingsDraft((current) =>
                           current
                             ? {
                                 ...current,
@@ -1098,9 +1216,9 @@ const AddonLibraryPage = ({
                     Check time
                     <input
                       type="time"
-                      value={addonUpdateSettings.updateCheckTime}
+                      value={addonUpdateSettingsDraft.updateCheckTime}
                       onChange={(event) =>
-                        setAddonUpdateSettings((current) =>
+                        setAddonUpdateSettingsDraft((current) =>
                           current
                             ? {
                                 ...current,
@@ -1113,13 +1231,13 @@ const AddonLibraryPage = ({
                     />
                   </label>
 
-                  {addonUpdateSettings.updateCheckFrequency === "weekly" ? (
+                  {addonUpdateSettingsDraft.updateCheckFrequency === "weekly" ? (
                     <label>
                       Check day
                       <select
-                        value={addonUpdateSettings.updateCheckWeekday}
+                        value={addonUpdateSettingsDraft.updateCheckWeekday}
                         onChange={(event) =>
-                          setAddonUpdateSettings((current) =>
+                          setAddonUpdateSettingsDraft((current) =>
                             current
                               ? {
                                   ...current,

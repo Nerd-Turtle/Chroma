@@ -724,6 +724,11 @@ h2 {
   pointer-events: auto;
 }
 
+.addon-library-layout > .status-banner-layer {
+  max-height: calc(100% - 2rem);
+  overflow-y: auto;
+}
+
 .status-banner-info {
   color: #def7e8;
   background: linear-gradient(180deg, rgba(26, 63, 45, 0.88), rgba(16, 41, 30, 0.92));
@@ -849,11 +854,12 @@ h2 {
 }
 
 .addon-library-section-downloaded {
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
 }
 
 .addon-library-tabs {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
@@ -1167,7 +1173,10 @@ h2 {
 .addon-library-tab-tools-label {
   color: #d8deea;
   font-size: 0.9rem;
-  white-space: nowrap;
+}
+
+.addon-library-tab-tools > button {
+  flex-shrink: 0;
 }
 
 .addon-library-row-actions {

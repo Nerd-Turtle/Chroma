@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import type { Database } from "better-sqlite3";
+import { getAuthenticatedUser, SESSION_COOKIE_NAME } from "../auth/authService.js";
 import type { BdsStartValidationResult } from "../../shared/types/index.js";
 import {
   discoverBdsDownloadUrl,
@@ -120,7 +121,15 @@ export async function registerBdsRoutes(app: FastifyInstance, db: Database) {
       reply.hijack();
 
       const raw = reply.raw;
+      const sessionToken = request.cookies[SESSION_COOKIE_NAME] ?? "";
+      const sessionIsValid = () => {
+        if (!raw.destroyed && !raw.writableEnded && getAuthenticatedUser(db, sessionToken)) return true;
+        raw.end();
+        return false;
+      };
       const writeEvent = (event: string, payload: unknown) => {
+        // A long-lived console connection must not outlive idle/absolute expiry or logout.
+        if (!sessionIsValid()) return;
         raw.write(`event: ${event}\n`);
         raw.write(`data: ${JSON.stringify(payload)}\n\n`);
       };
@@ -134,7 +143,7 @@ export async function registerBdsRoutes(app: FastifyInstance, db: Database) {
       writeEvent("snapshot", snapshot);
 
       const heartbeat = setInterval(() => {
-        raw.write(": keep-alive\n\n");
+        if (sessionIsValid()) raw.write(": keep-alive\n\n");
       }, 15_000);
 
       const unsubscribe = subscribeToBdsConsole(params.instanceId, (event) => {

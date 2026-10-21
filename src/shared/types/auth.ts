@@ -21,12 +21,14 @@ export type SessionRecord = {
   userId: string;
   createdAt: string;
   expiresAt: string;
+  lastActivityAt: string;
 };
 
 export type AppSettings = {
   timezone: string;
   language: string;
   notificationDurationSeconds: number;
+  sessionIdleTimeoutMinutes: number;
   curseForgeApiKeyConfigured: boolean;
   curseForgeApiKeyLastFour?: string;
 };

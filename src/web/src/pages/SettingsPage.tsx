@@ -15,7 +15,8 @@ function getTimezoneOptions(): string[] {
     return ["UTC"];
   }
 
-  return Intl.supportedValuesOf("timeZone");
+  // Intl's canonical list omits UTC, which is a valid setup/default timezone.
+  return ["UTC", ...Intl.supportedValuesOf("timeZone")];
 }
 
 const SettingsPage = () => {
@@ -25,6 +26,7 @@ const SettingsPage = () => {
   const [showTimezoneOptions, setShowTimezoneOptions] = useState(false);
   const [language, setLanguage] = useState("");
   const [notificationDurationSeconds, setNotificationDurationSeconds] = useState("2");
+  const [sessionIdleTimeoutMinutes, setSessionIdleTimeoutMinutes] = useState("10");
   const [curseForgeApiKey, setCurseForgeApiKey] = useState("");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -68,6 +70,7 @@ const SettingsPage = () => {
         setTimezoneQuery(result.settings.timezone);
         setLanguage(result.settings.language);
         setNotificationDurationSeconds(String(result.settings.notificationDurationSeconds));
+        setSessionIdleTimeoutMinutes(String(result.settings.sessionIdleTimeoutMinutes));
       } catch (settingsError) {
         setError(settingsError instanceof Error ? settingsError.message : "Unable to load settings");
       } finally {
@@ -135,6 +138,7 @@ const SettingsPage = () => {
       setTimezoneQuery(result.settings.timezone);
       setLanguage(result.settings.language);
       setNotificationDurationSeconds(String(result.settings.notificationDurationSeconds));
+      setSessionIdleTimeoutMinutes(String(result.settings.sessionIdleTimeoutMinutes));
       setCurseForgeApiKey("");
       setSuccess(message);
     } catch (settingsError) {
@@ -152,10 +156,17 @@ const SettingsPage = () => {
       return;
     }
 
+    const idleMinutes = Number(sessionIdleTimeoutMinutes);
+    if (!Number.isInteger(idleMinutes) || idleMinutes < 1 || idleMinutes > 120) {
+      setError("Session inactivity timeout must be an integer between 1 and 120 minutes.");
+      return;
+    }
+
     const payload: UpdateAppSettingsRequest = {
       timezone: timezone.trim(),
       language: language.trim(),
       notificationDurationSeconds: Number.parseInt(notificationDurationSeconds, 10),
+      sessionIdleTimeoutMinutes: Number(sessionIdleTimeoutMinutes),
       ...(curseForgeApiKey.trim() ? { curseForgeApiKey: curseForgeApiKey.trim() } : {}),
     };
 
@@ -172,6 +183,7 @@ const SettingsPage = () => {
         timezone: timezone.trim(),
         language: language.trim(),
         notificationDurationSeconds: Number.parseInt(notificationDurationSeconds, 10),
+        sessionIdleTimeoutMinutes: Number(sessionIdleTimeoutMinutes),
         clearCurseForgeApiKey: true,
       },
       "CurseForge API key removed.",
@@ -365,6 +377,20 @@ const SettingsPage = () => {
                     onChange={(event) => setNotificationDurationSeconds(event.target.value)}
                   />
                 </label>
+              </div>
+
+              <div className="settings-section">
+                <header className="settings-section-header">
+                  <h3>Security</h3>
+                  <p className="muted-copy">Automatically sign out inactive users.</p>
+                </header>
+                <label>
+                  Session inactivity timeout (minutes)
+                  <input type="number" min={1} max={120} step={1} required
+                    value={sessionIdleTimeoutMinutes}
+                    onChange={(event) => setSessionIdleTimeoutMinutes(event.target.value)} />
+                </label>
+                <p className="muted-copy">Default: 10 minutes. Applies to all sessions. Background refreshes do not count as activity.</p>
               </div>
             </section>
 

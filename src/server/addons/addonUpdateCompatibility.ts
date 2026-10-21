@@ -2,6 +2,8 @@ import type { Database } from "better-sqlite3";
 import type { Instance, InstanceAddon } from "../../shared/types/index.js";
 import { getAddonFile, listAddonFileDownloads, listAddonFilePacks, listInstanceAddonPacks, listInstanceAddons } from "./addonRepository.js";
 import type { CurseForgeModFile } from "./curseForgeClient.js";
+import { getAddonUpdateSettings } from "./addonUpdateSettingsService.js";
+import { isAllowedAddonRelease } from "./addonReleasePolicy.js";
 
 export function parseEngineVersion(value: string): number[] | null {
   return /^\d+\.\d+\.\d+(?:\.\d+)?$/.test(value) ? value.split(".").map(Number).slice(0, 3) : null;
@@ -24,7 +26,8 @@ export function getAddonUpdateCompatibilityIssue(db: Database, instance: Instanc
   const engine = parseEngineVersion(instance.bdsVersion);
   if (!engine) return "The instance Bedrock version cannot be verified.";
   const files = readReleaseFiles(db, targetId);
-  if (files.length === 0 || files.some((file) => file.releaseType !== 1 || file.isAvailable !== true)) return "Only available stable provider releases can be applied automatically.";
+  const { releaseChannel } = getAddonUpdateSettings(db);
+  if (files.length === 0 || files.some((file) => !isAllowedAddonRelease(file, releaseChannel))) return "This release is unavailable or excluded by the addon release channel setting.";
   if (files.some((file) => !(file.gameVersions ?? []).some((version) => parseEngineVersion(version)?.join(".") === engine.join(".")))) {
     return "The provider has not confirmed this release for the instance's Bedrock version.";
   }

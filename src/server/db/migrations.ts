@@ -239,6 +239,15 @@ export function runMigrations(db: Database): void {
       ON instance_addon_packs (addon_id);
   `);
 
+  const sessionColumns = db.prepare("PRAGMA table_info(sessions)").all() as Array<{ name: string }>;
+  if (!sessionColumns.some((column) => column.name === "last_activity_at")) {
+    db.transaction(() => {
+      db.exec("ALTER TABLE sessions ADD COLUMN last_activity_at TEXT;");
+      // Do not grant existing sessions fresh activity merely because Chroma restarted.
+      db.exec("UPDATE sessions SET last_activity_at = created_at;");
+    })();
+  }
+
   const columns = db.prepare(`PRAGMA table_info(instances)`).all() as Array<{ name: string }>;
   const columnNames = new Set(columns.map((column) => column.name));
 
@@ -323,6 +332,9 @@ export function runMigrations(db: Database): void {
       ON addon_file_packs (addon_file_download_id);
   `);
 
+  // Preserve the explicit linking workflow on every startup: 'missing' restored addons
+  // remain instance-owned. Only legacy linked records participate in these backfills.
+  // https://cwe.mitre.org/data/definitions/841.html
   db.exec(`
     INSERT OR IGNORE INTO addon_files (
       id,

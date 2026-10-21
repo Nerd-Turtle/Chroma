@@ -5,7 +5,7 @@ import type {
   InstanceBdsCheckUpdatesResponse,
 } from "../../shared/types/index.js";
 import { discoverBdsDownloadUrl } from "../bds/bdsDiscoveryService.js";
-import { getBdsStatusForInstance, installBdsForInstance } from "../bds/bdsInstallService.js";
+import { getBdsStatusForInstance, installBdsForManagedUpdate } from "../bds/bdsInstallService.js";
 import { getBdsRuntimeState, sendBdsCommand, setBdsMaintenanceState, startBdsForInstance, stopBdsForInstance } from "../bds/bdsRuntimeService.js";
 import { getAppSettings } from "../setup/setupService.js";
 import { listInstances } from "./instanceService.js";
@@ -122,7 +122,7 @@ async function applyBdsUpdateForInstance(
     await setBdsMaintenanceState(db, instance.id, "backup", "Creating an internal revert backup before updating BDS.");
     const revertBackup = await createInternalRevertBackup(db, instance.id);
     await setBdsMaintenanceState(db, instance.id, "update", `Installing BDS ${discovery.version}.`);
-    const install = await installBdsForInstance(db, instance.id);
+    const install = await installBdsForManagedUpdate(db, instance.id);
     await setBdsMaintenanceState(db, instance.id, "restore", "Restoring instance configuration after the BDS update.");
     await restoreConfigFilesFromInternalBackup(db, instance.id, revertBackup.backupId);
 
