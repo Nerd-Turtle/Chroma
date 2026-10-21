@@ -52,6 +52,7 @@ function syncWorkspaceHash(page: "dashboard" | "instances" | "addon-library" | "
 const App = () => {
   const [page, setPage] = useState<AppPage>("login");
   const [loading, setLoading] = useState(true);
+  const [initializationAttempt, setInitializationAttempt] = useState(0);
   const [initializationError, setInitializationError] = useState("");
   const [user, setUser] = useState<AuthUser | null>(null);
   const [addonLibraryQuery, setAddonLibraryQuery] = useState("");
@@ -75,32 +76,39 @@ const App = () => {
   }, [showLogin]);
 
   useEffect(() => {
+    const controller = new AbortController();
+    let ignore = false;
+    setLoading(true);
+    setInitializationError("");
+    // React useEffect cleanup: abort obsolete requests and ignore stale results on retry
+    // or unmount. https://react.dev/reference/react/useEffect#fetching-data-with-effects
     async function initializeApp() {
-      const setupStatus = await getSetupStatus();
+      const setupStatus = await getSetupStatus(controller.signal);
+      if (ignore) return;
       if (setupStatus.setupRequired) {
         setPage("setup");
         setLoading(false);
         return;
       }
-
-      const session = await getSession();
+      const session = await getSession(controller.signal);
+      if (ignore) return;
       if (session.authenticated) {
         setUser(session.user);
         setPage(getWorkspacePageFromHash() ?? "dashboard");
         setAddonLibraryQuery(getAddonLibraryQueryFromHash());
         setAddonLibrarySyncContext(getAddonLibrarySyncContextFromHash());
-      } else {
-        showLogin();
-      }
-
+      } else showLogin();
       setLoading(false);
     }
-
     void initializeApp().catch((error: unknown) => {
+      if (ignore) return;
       if (error instanceof ApiRequestError && error.status === 401) showLogin();
-      else setInitializationError(error instanceof Error ? error.message : "Unable to connect to Chroma.");
+      else setInitializationError(error instanceof DOMException && error.name === "TimeoutError"
+        ? "Connection timed out. Please try again."
+        : error instanceof Error ? error.message : "Unable to connect to Chroma.");
     });
-  }, [showLogin]);
+    return () => { ignore = true; controller.abort(); };
+  }, [showLogin, initializationAttempt]);
 
   useSessionActivity(user !== null, showLogin);
 
@@ -155,9 +163,9 @@ const App = () => {
                 : "page-frame"
         }
       >
-        {loading ? <section className="page-panel">{initializationError ? <>
+        {loading ? <section className="page-panel" aria-busy={!initializationError}>{initializationError ? <>
           <p className="form-error" role="alert">{initializationError}</p>
-          <button type="button" className="secondary-button" onClick={() => window.location.reload()}>Retry connection</button>
+          <button type="button" className="secondary-button" onClick={() => setInitializationAttempt((attempt) => attempt + 1)}>Retry connection</button>
         </> : "Loading Chroma..."}</section> : null}
         {!loading && page === "setup" ? <SetupPage onSetupComplete={() => setPage("login")} /> : null}
         {!loading && page === "login" ? <LoginPage onLoginSuccess={(nextUser: AuthUser) => {

@@ -1,3 +1,4 @@
+import { isTimeZone } from "../../../shared/validation.js";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { X } from "lucide-react";
 import ChromaUpdatesSection from "../components/ChromaUpdatesSection.js";
@@ -151,7 +152,7 @@ const SettingsPage = () => {
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
-    if (!timezoneOptions.includes(timezone)) {
+    if (!isTimeZone(timezone)) {
       setError("Select a valid timezone from the list");
       return;
     }

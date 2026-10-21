@@ -1,4 +1,6 @@
+import { isJsonObject } from "../../../shared/validation.js";
 import type {
+  AuthUser,
   AddonUpdateSummary,
   ChromaUpdateSettings,
   ChromaUpdateStatus,
@@ -89,15 +91,17 @@ async function readJson<T>(response: Response, options: { notifySessionExpired?:
 
   let body: T & Partial<InstanceBdsStartBlockedResponse> & { error?: string };
   try {
-    body = JSON.parse(text) as T & Partial<InstanceBdsStartBlockedResponse> & { error?: string };
+    const parsed: unknown = JSON.parse(text);
+    if (!isJsonObject(parsed)) throw new Error("Expected an API response object");
+    body = parsed as T & Partial<InstanceBdsStartBlockedResponse> & { error?: string };
   } catch {
-    throw new ApiRequestError("The server returned a response that was not valid JSON.", response.status);
+    throw new ApiRequestError("The server returned an invalid JSON response object.", response.status);
   }
 
   if (!response.ok) {
     const validationMessage =
       body.validation && Array.isArray(body.validation.errors) && body.validation.errors.length > 0
-        ? body.validation.errors.map((issue) => issue.message).join(" ")
+        ? body.validation.errors.filter((issue) => typeof issue?.message === "string").map((issue) => issue.message).join(" ")
         : undefined;
 
     throw new ApiRequestError(
@@ -110,9 +114,16 @@ async function readJson<T>(response: Response, options: { notifySessionExpired?:
   return body;
 }
 
-export async function getSetupStatus(): Promise<SetupStatusResponse> {
-  const response = await apiFetch("/api/setup/status");
-  return readJson<SetupStatusResponse>(response);
+function sessionRequestSignal(signal?: AbortSignal): AbortSignal {
+  const deadline = AbortSignal.timeout(15_000);
+  return signal ? AbortSignal.any([signal, deadline]) : deadline;
+}
+
+export async function getSetupStatus(signal?: AbortSignal): Promise<SetupStatusResponse> {
+  const response = await apiFetch("/api/setup/status", { signal: sessionRequestSignal(signal) });
+  const result = await readJson<SetupStatusResponse>(response);
+  if (typeof result.setupRequired !== "boolean") throw new ApiRequestError("Invalid setup status response", response.status);
+  return result;
 }
 
 export async function completeSetup(payload: SetupCompleteRequest): Promise<{ success: true }> {
@@ -133,7 +144,9 @@ export async function login(payload: LoginRequest): Promise<LoginResponse> {
   });
 
   // Incorrect credentials belong to the login form, not session-expiry handling.
-  return readJson<LoginResponse>(response, { notifySessionExpired: false });
+  const result = await readJson<LoginResponse>(response, { notifySessionExpired: false });
+  if (result.authenticated !== true || !isAuthUser(result.user)) throw new ApiRequestError("Invalid login response", response.status);
+  return result;
 }
 
 export async function logout(): Promise<void> {
@@ -144,9 +157,18 @@ export async function recordSessionActivity(): Promise<void> {
   await readJson(await apiFetch("/api/auth/activity", { method: "POST" }));
 }
 
-export async function getSession(): Promise<AuthSessionResponse> {
-  const response = await apiFetch("/api/auth/session");
-  return readJson<AuthSessionResponse>(response);
+function isAuthUser(value: unknown): value is AuthUser {
+  return isJsonObject(value) && typeof value.id === "string" && typeof value.username === "string" && value.role === "admin";
+}
+
+export async function getSession(signal?: AbortSignal): Promise<AuthSessionResponse> {
+  const response = await apiFetch("/api/auth/session", { signal: sessionRequestSignal(signal) });
+  const result = await readJson<AuthSessionResponse>(response);
+  if (result.authenticated === false) return result;
+  if (result.authenticated !== true || !isAuthUser(result.user)) {
+    throw new ApiRequestError("Invalid session response", response.status);
+  }
+  return result;
 }
 
 export async function getDashboardSummary(): Promise<DashboardSummary> {

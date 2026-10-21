@@ -1,9 +1,10 @@
+import { isClockTime, isTimeZone } from "../../shared/validation.js";
 import type { InstanceUpdateCheckWeekday } from "../../shared/types/index.js";
 
 type Schedule = { updateCheckFrequency: "daily" | "weekly"; updateCheckWeekday: InstanceUpdateCheckWeekday; updateCheckTime: string };
 
 export function isUpdateScheduleDue(schedule: Schedule, lastCheckedAt: string | undefined | null, timeZone: string, now = new Date()): boolean {
-  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(schedule.updateCheckTime)) return false;
+  if (!isClockTime(schedule.updateCheckTime) || !isTimeZone(timeZone)) return false;
   const formatter = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit", weekday: "long", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
   const parts = (date: Date) => Object.fromEntries(formatter.formatToParts(date).map((part) => [part.type, part.value]));
   const current = parts(now);

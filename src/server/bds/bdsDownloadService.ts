@@ -1,7 +1,12 @@
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, link, rm } from "node:fs/promises";
+import { createWriteStream } from "node:fs";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
+import { basename, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { getRuntimePaths } from "../config/paths.js";
 import { discoverBdsDownloadUrl, type BdsDiscoveryResult } from "./bdsDiscoveryService.js";
+import { withBoundedDownload } from "../utils/boundedDownload.js";
 
 export type BdsDownloadResult = BdsDiscoveryResult & {
   downloadPath: string;
@@ -17,23 +22,21 @@ function getDownloadBasePath(): string {
 export async function downloadBdsZip(): Promise<BdsDownloadResult> {
   const discovery = await discoverBdsDownloadUrl();
   const url = discovery.downloadUrl;
-  const response = await fetch(url);
-
-  if (!response.ok) {
-    throw new Error(`Failed to download BDS zip: ${response.status} ${response.statusText}`);
-  }
-
-  const filename = url.split("/").pop();
-  if (!filename) {
-    throw new Error("Unable to determine BDS zip filename from URL.");
-  }
+  const filename = basename(new URL(url).pathname);
+  if (!/^bedrock-server-\d+(?:\.\d+)+\.zip$/i.test(filename)) throw new Error("Invalid BDS archive filename.");
 
   const downloadDir = getDownloadBasePath();
   await mkdir(downloadDir, { recursive: true });
-  const downloadPath = `${downloadDir}/${randomUUID()}-${filename}`;
-
-  const buffer = Buffer.from(await response.arrayBuffer());
-  await writeFile(downloadPath, buffer);
+  const downloadPath = join(downloadDir, `${randomUUID()}-${filename}`);
+  const temporary = `${downloadPath}.tmp`;
+  try {
+    await withBoundedDownload(url, { label: "BDS download", maxBytes: 512 * 1024 * 1024, timeoutMs: 300_000 }, async (chunks, signal) => {
+      await pipeline(Readable.from(chunks, { objectMode: false }), createWriteStream(temporary, { flags: "wx" }), { signal });
+      signal.throwIfAborted();
+      // Publish a completed archive without replacing another download or installation.
+      await link(temporary, downloadPath);
+    });
+  } finally { await rm(temporary, { force: true }); }
 
   return {
     ...discovery,

@@ -1,3 +1,5 @@
+import { isTimeZone } from "../../shared/validation.js";
+import { ConflictError, InputValidationError } from "../utils/httpErrors.js";
 import type { Database } from "better-sqlite3";
 import type { AppSettings, SetupCompleteRequest, UpdateAppSettingsRequest, UserRecord } from "../../shared/types/index.js";
 import { createId } from "../utils/createId.js";
@@ -63,12 +65,13 @@ export function getCurseForgeApiKey(db: Database): string | undefined {
 }
 
 export async function completeInitialSetup(db: Database, input: SetupCompleteRequest): Promise<void> {
+  if (!isTimeZone(input.timezone)) throw new InputValidationError("timezone must be a valid named IANA timezone");
   if (isSetupComplete(db)) {
-    throw new Error("Setup is already complete");
+    throw new ConflictError("Setup is already complete");
   }
 
   if (getUserByUsername(db, input.username)) {
-    throw new Error("Username is already taken");
+    throw new ConflictError("Username is already taken");
   }
 
   // Hash before taking SQLite's write lock; never await inside a synchronous transaction.
@@ -78,8 +81,8 @@ export async function completeInitialSetup(db: Database, input: SetupCompleteReq
   // https://cwe.mitre.org/data/definitions/367.html
   // https://www.sqlite.org/lang_transaction.html#deferred_immediate_and_exclusive_transactions
   db.transaction(() => {
-    if (isSetupComplete(db)) throw new Error("Setup is already complete");
-    if (getUserByUsername(db, input.username)) throw new Error("Username is already taken");
+    if (isSetupComplete(db)) throw new ConflictError("Setup is already complete");
+    if (getUserByUsername(db, input.username)) throw new ConflictError("Username is already taken");
     const now = new Date().toISOString();
     const user: UserRecord = {
       id: createId("usr"), username: input.username, passwordHash, role: "admin",
@@ -97,9 +100,10 @@ export async function completeInitialSetup(db: Database, input: SetupCompleteReq
 }
 
 export function updateAppSettings(db: Database, input: UpdateAppSettingsRequest): AppSettings {
+  if (!isTimeZone(input.timezone)) throw new InputValidationError("timezone must be a valid named IANA timezone");
   if (input.sessionIdleTimeoutMinutes !== undefined && (!Number.isInteger(input.sessionIdleTimeoutMinutes) ||
     input.sessionIdleTimeoutMinutes < 1 || input.sessionIdleTimeoutMinutes > 120)) {
-    throw new Error("sessionIdleTimeoutMinutes must be an integer between 1 and 120");
+    throw new InputValidationError("sessionIdleTimeoutMinutes must be an integer between 1 and 120");
   }
   const now = new Date().toISOString();
 

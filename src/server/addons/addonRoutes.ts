@@ -1,3 +1,4 @@
+import { isClockTime } from "../../shared/validation.js";
 import type { FastifyInstance } from "fastify";
 import type { Database } from "better-sqlite3";
 import {
@@ -87,7 +88,7 @@ export async function registerAddonRoutes(app: FastifyInstance, db: Database): P
       return reply.code(400).send({ error: "updateCheckFrequency must be daily or weekly" });
     }
 
-    if (typeof body.updateCheckTime !== "string" || !/^([01]\d|2[0-3]):[0-5]\d$/.test(body.updateCheckTime)) {
+    if (!isClockTime(body.updateCheckTime)) {
       return reply.code(400).send({ error: "updateCheckTime must be a valid HH:MM time" });
     }
 
@@ -132,7 +133,7 @@ export async function registerAddonRoutes(app: FastifyInstance, db: Database): P
 
   app.put("/api/addons/library/:addonFileId/editor", async (request, reply) => {
     const params = request.params as { addonFileId: string };
-    const body = request.body as {
+    const body = (request.body ?? {}) as {
       links?: unknown;
     };
 
@@ -199,7 +200,7 @@ export async function registerAddonRoutes(app: FastifyInstance, db: Database): P
   });
 
   app.post("/api/addons/providers/curseforge/download", async (request, reply) => {
-    const body = request.body as { projectId?: unknown; fileId?: unknown };
+    const body = (request.body ?? {}) as { projectId?: unknown; fileId?: unknown };
 
     if (typeof body.projectId !== "number" || !Number.isInteger(body.projectId)) {
       return reply.code(400).send({ error: "projectId must be an integer" });
@@ -236,7 +237,7 @@ export async function registerAddonRoutes(app: FastifyInstance, db: Database): P
 
   app.post("/api/instances/:instanceId/addons/library", async (request, reply) => {
     const params = request.params as { instanceId: string };
-    const body = request.body as { addonFileIds?: unknown };
+    const body = (request.body ?? {}) as { addonFileIds?: unknown };
 
     if (!Array.isArray(body.addonFileIds) || !body.addonFileIds.every((addonFileId) => typeof addonFileId === "string")) {
       return reply.code(400).send({ error: "addonFileIds must be an array of strings" });
@@ -252,7 +253,7 @@ export async function registerAddonRoutes(app: FastifyInstance, db: Database): P
 
   app.post("/api/instances/:instanceId/addons/:addonId/link-library", async (request, reply) => {
     const params = request.params as { instanceId: string; addonId: string };
-    const body = request.body as { addonFileId?: unknown };
+    const body = (request.body ?? {}) as { addonFileId?: unknown };
     if (typeof body.addonFileId !== "string" || body.addonFileId === "") {
       return reply.code(400).send({ error: "addonFileId is required" });
     }
@@ -266,7 +267,7 @@ export async function registerAddonRoutes(app: FastifyInstance, db: Database): P
 
   app.put("/api/instances/:instanceId/addons/order", async (request, reply) => {
     const params = request.params as { instanceId: string };
-    const body = request.body as { addonIds?: unknown };
+    const body = (request.body ?? {}) as { addonIds?: unknown };
 
     if (!Array.isArray(body.addonIds) || !body.addonIds.every((addonId) => typeof addonId === "string")) {
       return reply.code(400).send({ error: "addonIds must be an array of strings" });
@@ -335,7 +336,7 @@ export async function registerAddonRoutes(app: FastifyInstance, db: Database): P
 
   app.post("/api/instances/:instanceId/addons/providers/curseforge/download", async (request, reply) => {
     const params = request.params as { instanceId: string };
-    const body = request.body as { projectId?: unknown; fileId?: unknown };
+    const body = (request.body ?? {}) as { projectId?: unknown; fileId?: unknown };
 
     if (typeof body.projectId !== "number" || !Number.isInteger(body.projectId)) {
       return reply.code(400).send({ error: "projectId must be an integer" });

@@ -1,3 +1,4 @@
+import { isClockTime } from "../../shared/validation.js";
 import type { FastifyInstance } from "fastify";
 import multipart from "@fastify/multipart";
 import type { Database } from "better-sqlite3";
@@ -50,7 +51,7 @@ export function registerInstanceRoutes(app: FastifyInstance, db: Database): void
     });
 
     protectedApp.post("/api/instances", async (request, reply) => {
-      const body = request.body as Partial<CreateInstanceRequest>;
+      const body = (request.body ?? {}) as Partial<CreateInstanceRequest>;
 
       if (typeof body.friendlyName !== "string" || body.friendlyName.trim() === "") {
         return reply.code(400).send({
@@ -82,9 +83,9 @@ export function registerInstanceRoutes(app: FastifyInstance, db: Database): void
         });
       }
 
-      if (typeof body.updateCheckTime !== "string" || !/^\d{2}:\d{2}$/.test(body.updateCheckTime)) {
+      if (!isClockTime(body.updateCheckTime)) {
         return reply.code(400).send({
-          error: "updateCheckTime must be in HH:MM format",
+          error: "updateCheckTime must be between 00:00 and 23:59 in HH:MM format",
         });
       }
 
@@ -135,7 +136,7 @@ export function registerInstanceRoutes(app: FastifyInstance, db: Database): void
 
     protectedApp.put("/api/instances/:instanceId", async (request, reply) => {
       const params = request.params as { instanceId: string };
-      const body = request.body as Partial<UpdateInstanceRequest>;
+      const body = (request.body ?? {}) as Partial<UpdateInstanceRequest>;
 
       if (typeof body.friendlyName !== "string" || body.friendlyName.trim() === "") {
         return reply.code(400).send({ error: "friendlyName is required" });
@@ -153,8 +154,8 @@ export function registerInstanceRoutes(app: FastifyInstance, db: Database): void
         return reply.code(400).send({ error: "updateCheckWeekday must be a valid weekday" });
       }
 
-      if (typeof body.updateCheckTime !== "string" || !/^\d{2}:\d{2}$/.test(body.updateCheckTime)) {
-        return reply.code(400).send({ error: "updateCheckTime must be in HH:MM format" });
+      if (!isClockTime(body.updateCheckTime)) {
+        return reply.code(400).send({ error: "updateCheckTime must be between 00:00 and 23:59 in HH:MM format" });
       }
 
       const instance = await updateInstance(db, params.instanceId, {

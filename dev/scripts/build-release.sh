@@ -180,7 +180,9 @@ main() {
 
   mkdir -p "${bundle_dir}/app/dist" "${bundle_dir}/app/web" "${bundle_dir}/node" "${bundle_dir}/install" "${bundle_dir}/systemd"
   cp "${REPO_ROOT}/package.json" "${bundle_dir}/app/package.json"
+  cp "${REPO_ROOT}/LICENSE" "${bundle_dir}/LICENSE"
   cp -a "${REPO_ROOT}/dist/server" "${bundle_dir}/app/dist/"
+  cp -a "${REPO_ROOT}/dist/shared" "${bundle_dir}/app/dist/"
   cp -a "${REPO_ROOT}/src/web/dist" "${bundle_dir}/app/web/"
   cp -a "${deploy_dir}/node_modules" "${bundle_dir}/app/node_modules"
   cp "${REPO_ROOT}/install/ubuntu/generate-self-signed-certificate.sh" "${bundle_dir}/install/generate-self-signed-certificate.sh"

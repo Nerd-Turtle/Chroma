@@ -1,3 +1,4 @@
+import { isTimeZone } from "../../../shared/validation.js";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { completeSetup } from "../api/chromaApi.js";
 
@@ -22,7 +23,7 @@ const SetupPage = ({ onSetupComplete }: SetupPageProps) => {
       return ["UTC"];
     }
 
-    return Intl.supportedValuesOf("timeZone");
+    return ["UTC", ...Intl.supportedValuesOf("timeZone")];
   }, []);
 
   const filteredTimezoneOptions = useMemo(() => {
@@ -51,7 +52,7 @@ const SetupPage = ({ onSetupComplete }: SetupPageProps) => {
       return;
     }
 
-    if (!timezoneOptions.includes(timezone)) {
+    if (!isTimeZone(timezone)) {
       setError("Select a valid timezone from the list");
       return;
     }

@@ -1,3 +1,4 @@
+import { DownloadHttpError, fetchBoundedText } from "../utils/boundedDownload.js";
 type CurseForgePagination = {
   index: number;
   pageSize: number;
@@ -198,19 +199,18 @@ export class CurseForgeClient {
       url.searchParams.set(key, value);
     }
 
-    const response = await fetch(url, {
-      signal: AbortSignal.timeout(15_000),
-      headers: {
-        Accept: "application/json",
-        "x-api-key": this.apiKey,
-      },
-    });
-
-    if (!response.ok) {
-      throw new CurseForgeApiError(response.status, `CurseForge request failed with status ${response.status}`);
+    try {
+      const text = await fetchBoundedText(url.href, {
+        label: "CurseForge API request", maxBytes: 4 * 1024 * 1024, timeoutMs: 15_000,
+        // Never forward a provider credential through a redirect.
+        maxRedirects: 0,
+        headers: { Accept: "application/json", "x-api-key": this.apiKey },
+      });
+      return JSON.parse(text) as T;
+    } catch (error) {
+      if (error instanceof DownloadHttpError) throw new CurseForgeApiError(error.status, `CurseForge request failed with status ${error.status}`);
+      throw error;
     }
-
-    return response.json() as Promise<T>;
   }
 }
 

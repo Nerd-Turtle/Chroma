@@ -1,3 +1,4 @@
+import { isClockTime } from "../../shared/validation.js";
 import type { Database } from "better-sqlite3";
 import type { AddonUpdateSettings } from "../../shared/types/index.js";
 import { getAppSetting, upsertAppSetting } from "../setup/appSettingsRepository.js";
@@ -34,7 +35,7 @@ export function getAddonUpdateSettings(db: Database): AddonUpdateSettings {
         ? updateCheckFrequency
         : DEFAULT_ADDON_UPDATE_SETTINGS.updateCheckFrequency,
     updateCheckTime:
-      typeof updateCheckTime === "string" && updateCheckTime !== ""
+      isClockTime(updateCheckTime)
         ? updateCheckTime
         : DEFAULT_ADDON_UPDATE_SETTINGS.updateCheckTime,
     updateCheckWeekday:
@@ -51,7 +52,7 @@ export function getAddonUpdateSettings(db: Database): AddonUpdateSettings {
 }
 
 export function saveAddonUpdateSettings(db: Database, input: AddonUpdateSettings): AddonUpdateSettings {
-  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(input.updateCheckTime)) throw new Error("Choose an update time between 00:00 and 23:59.");
+  if (!isClockTime(input.updateCheckTime)) throw new Error("Choose an update time between 00:00 and 23:59.");
   if (!["stable", "beta", "alpha"].includes(input.releaseChannel)) throw new Error("Choose stable, beta or alpha addon releases.");
   const now = new Date().toISOString();
 

@@ -9,6 +9,7 @@ import { getDatabasePath, getRuntimePaths } from "./config/paths.js";
 import { registerAuthRoutes } from "./auth/authRoutes.js";
 import { registerAuthenticationThrottle } from "./auth/authThrottle.js";
 import { registerRequestProtection } from "./auth/requestProtection.js";
+import { registerRequestValidation } from "./utils/requestValidation.js";
 import { registerInstanceRoutes } from "./instances/instanceRoutes.js";
 import { registerPkiRoutes } from "./pki/pkiRoutes.js";
 import type { TlsCertificateMaterial } from "./pki/pkiService.js";
@@ -35,6 +36,7 @@ export function buildApp(db: Database, options: BuildAppOptions = {}) {
   void app.register(cookie);
   registerRequestProtection(app);
   registerAuthenticationThrottle(app);
+  registerRequestValidation(app);
 
   app.get("/health", async () => {
     return {

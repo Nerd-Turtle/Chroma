@@ -1,3 +1,5 @@
+import { isClockTime } from "../../shared/validation.js";
+import { InputValidationError } from "../utils/httpErrors.js";
 import { assertNoAddonUpdateInProgress, runInstanceMutation } from "./addonUpdateControl.js";
 import type { Database } from "better-sqlite3";
 import type { Instance } from "../../shared/types/index.js";
@@ -61,6 +63,7 @@ export function updateInstance(
   instanceId: string,
   input: UpdateInstanceInput,
 ): Promise<Instance | undefined> {
+  if (!isClockTime(input.updateCheckTime)) throw new InputValidationError("updateCheckTime must be between 00:00 and 23:59");
   const instance = getInstanceFromDb(db, instanceId);
 
   if (!instance) {
@@ -96,6 +99,7 @@ export async function createInstance(
   db: Database,
   input: CreateInstanceInput,
 ): Promise<Instance> {
+  if (!isClockTime(input.updateCheckTime)) throw new InputValidationError("updateCheckTime must be between 00:00 and 23:59");
   const now = new Date().toISOString();
   const id = createId("inst");
   const runtimePaths = getRuntimePaths();

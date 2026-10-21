@@ -1,3 +1,5 @@
+import { isTimeZone } from "../../shared/validation.js";
+import { ConflictError, InputValidationError } from "../utils/httpErrors.js";
 import type { Database } from "better-sqlite3";
 import type { FastifyInstance } from "fastify";
 import type { SetupCompleteRequest, SetupStatusResponse, UpdateAppSettingsRequest } from "../../shared/types/index.js";
@@ -16,7 +18,7 @@ export function registerSetupRoutes(app: FastifyInstance, db: Database): void {
   app.post("/api/setup/complete", { bodyLimit: 16 * 1024 }, async (request, reply) => {
     const body = (request.body ?? {}) as Partial<SetupCompleteRequest>;
     if (isSetupComplete(db)) {
-      return reply.code(400).send({ error: "Setup is already complete" });
+      return reply.code(409).send({ error: "Setup is already complete" });
     }
 
     if (typeof body.username !== "string" || body.username.trim().length < 3 || body.username.trim().length > 64) {
@@ -27,8 +29,8 @@ export function registerSetupRoutes(app: FastifyInstance, db: Database): void {
       return reply.code(400).send({ error: "password must be 8-1024 characters" });
     }
 
-    if (typeof body.timezone !== "string" || body.timezone.trim() === "") {
-      return reply.code(400).send({ error: "timezone is required" });
+    if (typeof body.timezone !== "string" || !isTimeZone(body.timezone.trim())) {
+      return reply.code(400).send({ error: "timezone must be a valid named IANA timezone" });
     }
 
     if (typeof body.language !== "string" || body.language.trim() === "") {
@@ -58,8 +60,9 @@ export function registerSetupRoutes(app: FastifyInstance, db: Database): void {
       return { success: true };
     } catch (error) {
       if (error instanceof PasswordHashBusyError) return reply.header("Retry-After", 5).code(429).send({ error: error.message });
-      const message = error instanceof Error ? error.message : "Setup failed";
-      return reply.code(400).send({ error: message });
+      if (error instanceof InputValidationError || error instanceof ConflictError) return reply.code(error.statusCode).send({ error: error.message });
+      request.log.error({ err: error }, "Initial setup failed internally");
+      return reply.code(500).send({ error: "Unable to complete setup. Please try again." });
     }
   });
 
@@ -88,8 +91,8 @@ export function registerSetupRoutes(app: FastifyInstance, db: Database): void {
       return reply.code(400).send({ error: "sessionIdleTimeoutMinutes must be an integer between 1 and 120" });
     }
 
-    if (typeof body.timezone !== "string" || body.timezone.trim() === "") {
-      return reply.code(400).send({ error: "timezone is required" });
+    if (typeof body.timezone !== "string" || !isTimeZone(body.timezone.trim())) {
+      return reply.code(400).send({ error: "timezone must be a valid named IANA timezone" });
     }
 
     if (typeof body.language !== "string" || body.language.trim() === "") {
@@ -133,8 +136,9 @@ export function registerSetupRoutes(app: FastifyInstance, db: Database): void {
 
       return { settings };
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Unable to update application settings";
-      return reply.code(400).send({ error: message });
+      if (error instanceof InputValidationError) return reply.code(400).send({ error: error.message });
+      request.log.error({ err: error }, "Application settings update failed internally");
+      return reply.code(500).send({ error: "Unable to update application settings. Please try again." });
     }
   });
 }
